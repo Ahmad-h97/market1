@@ -2,41 +2,6 @@ const User = require('../models/User');
 const House = require('../models/House');
 
 
-const registerUser = async (req, res) => {
-  const { name, email, password } = req.body;
-  try {
-    const user = new User({ name, email, password });
-    await user.save();
-    res.status(201).json({ message: 'User created', user });
-  } catch (err) {
-    console.error('Error creating user:', err.message);  // Log the error message
-    res.status(500).json({ message: 'register Error' });
-  }
-};
-
-
-const loginUser = async (req, res) => {
-  const { email, password } = req.body;
-
-  try {
-    // 1. Find the user
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    // 2. Check password directly (NOT secure, but okay for learning)
-    if (user.password !== password) {
-      return res.status(401).json({ error: 'Invalid password' });
-    }
-
-    // 3. Success
-    res.status(200).json({ message: 'Login successful', userId: user._id });
-  } catch (err) {
-    res.status(500).json({ error: 'login error' });
-  }
-};
-
 
 
 const postHouse = async (req, res) => {
@@ -136,4 +101,4 @@ const removeFav = async (req, res) => {
 };
 
 
-module.exports = { registerUser,loginUser, postHouse ,markFav, removeFav };
+module.exports = {  postHouse ,markFav, removeFav };
