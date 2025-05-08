@@ -30,7 +30,7 @@ const getAllHouses = async (req, res) => {
       
 
 
-    const houses = await House.find(filter).populate('postedBy', 'name email');
+    const houses = await House.find(filter).populate('postedBy', 'username email');
     res.status(200).json(houses);
   } catch (err) {
     console.error('Get Houses Error:', err);
@@ -41,8 +41,8 @@ const getAllHouses = async (req, res) => {
 const getHouseDetails = async (req, res) => {
   try {
     const house = await House.findById(req.params.id)
-      .populate('postedBy', 'name email')
-      .populate('reviews.user', 'name email');
+      .populate('postedBy', 'username email')
+      .populate('reviews.user', 'username email');
 
     if (!house) {
       return res.status(404).json({ error: 'House not found' });

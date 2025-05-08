@@ -3,6 +3,7 @@ const dotenv = require('dotenv');
 const connectDB = require('./config/db');
 const userRoutes = require('./routes/userRoutes');
 const houseRoutes = require('./routes/houseRoutes');
+const authRoutes = require('./routes/authRoutes');
 const cors = require('cors');
 
 dotenv.config();
@@ -15,6 +16,9 @@ app.use(cors());
 
 app.use('/api/users', userRoutes);
 app.use('/api/houses', houseRoutes);
+app.use('/api/auth', authRoutes);
+
+
 
 connectDB()
   .then(() => {
@@ -29,12 +33,12 @@ connectDB()
 /*
 
 ├── market/  
-│ ├── controllers/userController 
-│ ├── routes/ userRroutes
+│ ├── controllers/userController , houseController
+│ ├── routes/ userRroutes , houseroutes
 │ ├── models/ house , user 
-
-
-│ ├── config/db.js 
+│ ├── middleware/upload.js
+│ ├── config/db.js , cloudinry.js
 │ ├── .env
 │ ├── server.js
+│ ├── .gitignore
 */
