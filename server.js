@@ -1,13 +1,13 @@
-const express = require('express');
-const dotenv = require('dotenv');
-const connectDB = require('./config/db');
-const userRoutes = require('./routes/userRoutes');
-const houseRoutes = require('./routes/houseRoutes');
-const authRoutes = require('./routes/authRoutes');
-const cors = require('cors');
+import express from 'express';
+import dotenv from 'dotenv';
+import connectDB from './config/db.js';
+import userRoutes from './routes/userRoutes.js';
+import houseRoutes from './routes/houseRoutes.js';
+import authRoutes from './routes/authRoutes.js';
+import cors from 'cors';
 
 dotenv.config();
-connectDB(); // <-- connect to MongoDB
+
 
 const app = express();
 app.use(express.json());
@@ -34,11 +34,12 @@ connectDB()
 
 ├── market/  
 │ ├── controllers/userController , houseController
-│ ├── routes/ userRroutes , houseroutes
+│ ├── routes/ userRroutes , houseroutes, authroutes
 │ ├── models/ house , user 
-│ ├── middleware/upload.js
-│ ├── config/db.js , cloudinry.js
+│ ├── middleware/upload.js,verifyjwt
+│ ├── config/db.js , cloudinry.js ,jwt.config
 │ ├── .env
+│ ├── env.js
 │ ├── server.js
 │ ├── .gitignore
 */
