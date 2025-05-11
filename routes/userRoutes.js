@@ -1,13 +1,12 @@
-const express = require('express');
+import express from 'express';
+import { postHouse, markFav, removeFav } from '../controllers/userController.js';
+import uploadMultiple from '../middleware/upload.js';
+
 const router = express.Router();  // Define the router here
-
-const {postHouse, markFav, removeFav } = require('../controllers/userController');
-const uploadMultiple = require('../middleware/upload');
-
 
 
 router.post('/houses', uploadMultiple, postHouse);
 router.post('/:userId/interested/:houseId', markFav);
 router.delete('/:userId/interested/:houseId', removeFav);
 
-module.exports = router;
+export default router;

@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 function arrayLimit(val) {
   return val.length <= 3;
@@ -27,4 +27,5 @@ const houseSchema = new mongoose.Schema({
   reviews: [reviewSchema]
 }, { timestamps: true });
 
-module.exports = mongoose.model('House', houseSchema);
+const House = mongoose.model('House', houseSchema);
+export default House;

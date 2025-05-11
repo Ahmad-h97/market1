@@ -1,34 +1,122 @@
-const User = require('../models/User');
-const jwt = require('jsonwebtoken');
+import { env } from '../env.js';  // Correct
+import User from '../models/User.js';
+import Verification from '../models/verification.js';
+import jwt from 'jsonwebtoken';
+import validator from 'validator';
+import { sendVerificationEmail } from '../services/emailServices.js';
+
+const validateEmail = (email) => {
+  if (!validator.isEmail(email)) {
+    throw new Error("Invalid email format. Example: user@example.com");
+  }
+  return validator.normalizeEmail(email); // This will clean the email
+};
+
+// Inline helper function
+const generateVerificationCode = async (email) => {
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes from now
+
+
+
+  await Verification.findOneAndUpdate(
+    { email },
+    { code, expiresAt, attempts: 0 },
+    { upsert: true, new: true }
+  );
+
+  await sendVerificationEmail(email, code);
+};
 
 const registerUser = async (req, res) => {
-  const { username, email, password } = req.body;
+ 
   try {
 
-    if (!username || !email || !password) {
-        return res.status(400).json({ error: 'All fields are required' });
-        }
-        
-        const duplicate = await User.findOne({ $or: [{ email }, { username }] });
-        if (duplicate) {
-        return res.status(409).json({ error: 'Email or username already exists' });
-        }
-        
+     if (!req.body || Object.keys(req.body).length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Registration data is required",
+        details: "Expected: { username, email, password }"
+      });
+    }
+
+     const { username, email, password } = req.body;
+
+      const cleanEmail = validateEmail(email); // Throws error if invalid
 
 
-    const user = new User({ username, email, password });
+     const missingFields = [];
+    if (!username) missingFields.push("username");
+    if (!email) missingFields.push("email");
+    if (!password) missingFields.push("password");
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        missingFields,
+      });
+    }
+     
+
+
+
+
+    
+      const existingUser = await User.findOne({ 
+      $or: [{ email }, { username }] 
+    });
+
+    if (existingUser) {
+      const errors = {};
+      if (existingUser.email === email) errors.email = "Email already registered";
+      if (existingUser.username === username) errors.username = "Username taken";
+
+      return res.status(409).json({
+        success: false,
+        conflicts: errors
+      });
+    }
+
+        
+      if (password.length < 8) {
+      return res.status(400).json({
+        success: false,
+        error: "Password must be at least 8 characters",
+        minLength: 8
+      });
+    }
+
+
+
+    const user = new User({ username, email, password,isVerified: false });
     await user.save();
 
+
+     // Generate and send verification code
+    await generateVerificationCode(email);
+
+    res.status(201).json({
+      success: true,
+      message: 'Verification code sent to email',
+      nextStep: '/verify-email',
+      user: { id: user._id, username: user.username }
+    });
+
+    
+
+     // generate tokens
+/*
     const accessToken = jwt.sign(
         { id: user._id },
-        process.env.ACCESS_TOKEN_SECRET,
+        env.ACCESS_TOKEN_SECRET,
         { expiresIn: '15m' }
         );
 
 
     const refreshToken = jwt.sign(
         { id: user._id },
-        process.env.REFRESH_TOKEN_SECRET,
+        env.REFRESH_TOKEN_SECRET,
         { expiresIn: '7d' }
         );
             
@@ -36,9 +124,9 @@ const registerUser = async (req, res) => {
     await user.save();
 
     res.cookie('jwt', refreshToken, {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'None',
+        httpOnly: true,  // Cookie inaccessible to JavaScript
+        secure: true,    // Only sent over HTTPS
+        sameSite: 'None',   // Allows cross-site requests
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
         });
 
@@ -46,41 +134,100 @@ const registerUser = async (req, res) => {
     res.status(201).json({
         success: true,
         accessToken,
-        message: 'User created',
-        user: { id: user._id, username: user.username, email: user.email }
+        message: 'Registration successful',
+        user: { id: user._id, username: user.username}
 
         });
-            
+          */  
 
     
   } catch (err) {
-    console.error('Error creating user:', err.message);  // Log the error message
+    console.error("Registration error:", err);  // Log the error message
     res.status(500).json({ message: 'register Error' });
   }
 };
 
 
 const loginUser = async (req, res) => {
-  const { email, password } = req.body;
+  
 
   try {
-    // 1. Find the user
+
+     if (!req.body || Object.keys(req.body).length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Registration data is required",
+        details: "Expected: { email, password }"
+      });
+    }
+
+    const { email, password } = req.body;
+
+     if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields",
+        missingFields: [
+          ...(email ? [] : ['email']),
+          ...(password ? [] : ['password']),
+        ]
+      });
+    }
+
+      if (!validator.isEmail(email)) {
+  return res.status(400).json({
+    success: false,
+    error: "Invalid email format",
+    example: "user@example.com"
+  });
+}
+  
+    
+       // 1. Find the user
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // 2. Check password directly (NOT secure, but okay for learning)
-    if (user.password !== password) {
-      return res.status(401).json({ error: 'Invalid password' });
+
+   
+     // 2. Check password using bcrypt
+    const isMatch = await user.comparePassword(password);
+    if (!isMatch) {
+      return res.status(401).json({ success: false, error: 'Invalid password' });
     }
 
+    const accessToken = jwt.sign(
+  { id: user._id },
+  env.ACCESS_TOKEN_SECRET,
+  { expiresIn: '15m' }
+);
+
+const refreshToken = jwt.sign(
+  { id: user._id },
+  env.REFRESH_TOKEN_SECRET,
+  { expiresIn: '7d' }
+);
+
+user.refreshToken = refreshToken;
+await user.save();
+
     // 3. Success
-    res.status(200).json({ message: 'Login successful', userId: user._id });
-  } catch (err) {
-    res.status(500).json({ error: 'login error' });
+      res.status(200).json({
+        success: true,
+        message: 'Login successful',
+        accessToken,
+        refreshToken,
+        user: {
+          id: user._id,
+          username: user.username,
+            }
+      });
+} catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Login error' });
   }
 };
 
 
-module.exports = { registerUser,loginUser };
+export { registerUser, loginUser };

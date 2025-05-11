@@ -1,5 +1,5 @@
-const User = require('../models/User');
-const House = require('../models/House');
+import User from '../models/User.js';
+import House from '../models/House.js';
 
 
 
@@ -40,7 +40,7 @@ const postHouse = async (req, res) => {
     res.status(201).json({ message: 'House posted', house: newHouse });
   } catch (err) {
     console.error('Post House Error:', err);
-    res.status(500).json({ error: 'post house error' });
+    res.status(500).json({ error: err.message });
   }
 };
 
@@ -101,4 +101,4 @@ const removeFav = async (req, res) => {
 };
 
 
-module.exports = {  postHouse ,markFav, removeFav };
+export {  postHouse ,markFav, removeFav };

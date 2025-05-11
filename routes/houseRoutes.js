@@ -1,7 +1,10 @@
-const express = require('express');
+import express from 'express';
+import { 
+  getAllHouses, getHouseDetails, editHouse, deleteHouse, upsertReview, deleteReview 
+} from '../controllers/houseController.js';
+import uploadMultiple from '../middleware/upload.js';
+
 const router = express.Router();
-const { getAllHouses,getHouseDetails, editHouse, deleteHouse, upsertReview ,deleteReview } = require('../controllers/houseController');
-const uploadMultiple = require('../middleware/upload');
 
 router.get('/houses', getAllHouses);
 router.get('/houses/:id', getHouseDetails);
@@ -10,4 +13,4 @@ router.delete('/houses/:houseId', deleteHouse);
 router.put('/:houseId/reviews/:userId', upsertReview);  
 router.delete('/:houseId/reviews/:userId', deleteReview);
 
-module.exports = router;
+export default router;  // ES Modules default export

@@ -1,4 +1,4 @@
-const House = require('../models/House'); // Make sure it's imported
+import House from '../models/House.js';
 
 const getAllHouses = async (req, res) => {
   try {
@@ -175,7 +175,7 @@ const deleteReview = async (req, res) => {
   }
 };
 
-module.exports = { getAllHouses, getHouseDetails, editHouse ,deleteHouse , deleteReview, upsertReview };
+export { getAllHouses, getHouseDetails, editHouse ,deleteHouse , deleteReview, upsertReview };
 
 
 /*
