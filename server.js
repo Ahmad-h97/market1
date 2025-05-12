@@ -32,14 +32,35 @@ connectDB()
 
 /*
 
-├── market/  
-│ ├── controllers/userController , houseController
-│ ├── routes/ userRroutes , houseroutes, authroutes
-│ ├── models/ house , user 
-│ ├── middleware/upload.js,verifyjwt
-│ ├── config/db.js , cloudinry.js ,jwt.config
-│ ├── .env
-│ ├── env.js
-│ ├── server.js
-│ ├── .gitignore
+market/
+├── controllers/
+│   ├── userController.js
+│   ├── houseController.js
+│   ├── authController.js
+│   └── verificationController.js
+│
+├── routes/
+│   ├── userRoutes.js
+│   ├── houseRoutes.js
+│   └── authRoutes.js
+│
+├── models/
+│   ├── house.js
+│   ├── user.js
+│   └── verification.js
+│
+├── middleware/
+│   ├── upload.js
+│   └── verifyJWT.js
+│
+├── config/
+│   ├── db.js
+│   ├── cloudinary.js
+│   └── jwt.config.js
+│
+├── .env
+├── env.js
+├── server.js
+├── services.js
+└── .gitignore
 */

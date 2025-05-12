@@ -2,7 +2,7 @@ import { env } from '../env.js';  // Correct
 import User from '../models/User.js';
 import Verification from '../models/verification.js';
 import jwt from 'jsonwebtoken';
-import validator from 'validator';
+import validator from 'validator';//to validate email ,password,url,etc....
 import { sendVerificationEmail } from '../services/emailServices.js';
 
 const validateEmail = (email) => {
@@ -42,8 +42,6 @@ const registerUser = async (req, res) => {
 
      const { username, email, password } = req.body;
 
-      const cleanEmail = validateEmail(email); // Throws error if invalid
-
 
      const missingFields = [];
     if (!username) missingFields.push("username");
@@ -61,7 +59,7 @@ const registerUser = async (req, res) => {
 
 
 
-
+    email = validateEmail(email); // change variable  name latter to avoid conflict 
     
       const existingUser = await User.findOne({ 
       $or: [{ email }, { username }] 
