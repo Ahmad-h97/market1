@@ -20,6 +20,8 @@ const generateVerificationCode = async (email) => {
 
 
   await Verification.findOneAndUpdate(
+    { username },
+    { password },
     { email },
     { code, expiresAt, attempts: 0 },
     { upsert: true, new: true }
