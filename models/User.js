@@ -8,8 +8,14 @@ const userSchema = new mongoose.Schema({
   refreshToken: { type: String, default: '' },
   postedHouses: [{ type: mongoose.Schema.Types.ObjectId, ref: 'House' }],
   favorites:        [{ type: mongoose.Schema.Types.ObjectId, ref: 'House' }],
+  isVerified: { type: Boolean, default: false },
 }, { timestamps: true });
 
+// Auto-delete unverified accounts after 24 hours
+userSchema.index({ createdAt: 1 }, { 
+  expireAfterSeconds: 86400, // 24 hours
+  partialFilterExpression: { isVerified: false } 
+});
 
 userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
