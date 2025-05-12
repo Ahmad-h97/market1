@@ -13,7 +13,7 @@ const userSchema = new mongoose.Schema({
 
 // Auto-delete unverified accounts after 24 hours
 userSchema.index({ createdAt: 1 }, { 
-  expireAfterSeconds: 86400, // 24 hours
+  expireAfterSeconds: 900, // 24 hours
   partialFilterExpression: { isVerified: false } 
 });
 
