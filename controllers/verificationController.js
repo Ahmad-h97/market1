@@ -28,6 +28,7 @@ const verifyEmail = async (req, res) => {
 
     // Limit attempts
     if (record.attempts >= 5) {
+      await Verification.deleteOne({ email });
       return res.status(429).json({
         success: false,
         error: "Too many incorrect attempts. Please request a new code.",
