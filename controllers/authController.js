@@ -59,7 +59,7 @@ const registerUser = async (req, res) => {
 
 
 
-    cleanemail = validateEmail(email); // change variable  name latter to avoid conflict 
+    const cleanemail = validateEmail(email); // change variable  name latter to avoid conflict 
     
       const existingUser = await User.findOne({ 
       $or: [{ email }, { username }] 
