@@ -4,45 +4,7 @@ import House from '../models/House.js';
 
 
 
-const postHouse = async (req, res) => {
-  const { title,description, location, price, userId } = req.body;
 
-  if (req.files.length > 3) {
-    return res.status(400).json({ error: 'Maximum of 3 images allowed.' });
-  }
-
-  const imageUrls = req.files.map(file => file.path);
-
-  //const imageUrl = req.file ? req.file.path : null;
-
-  try {
-
-    // 1. Find the user
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-
-    // 2. Create new house
-    const newHouse = new House({
-      title,
-      description,
-      location,
-      price,
-      images: imageUrls,
-      postedBy: user._id
-    });
-
-    await newHouse.save();
-
-    // 3. Optional: Add to user's postedHouses array
-    user.postedHouses.push(newHouse._id);
-    await user.save();
-
-    res.status(201).json({ message: 'House posted', house: newHouse });
-  } catch (err) {
-    console.error('Post House Error:', err);
-    res.status(500).json({ error: err.message });
-  }
-};
 
 
 const markFav = async (req, res) => {
