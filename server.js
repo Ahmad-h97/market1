@@ -56,11 +56,15 @@ market/
 ├── config/
 │   ├── db.js
 │   ├── cloudinary.js
-│   └── jwt.config.js
+│   └── jwtConfig.js
 │
 ├── .env
 ├── env.js
 ├── server.js
 ├── services.js
 └── .gitignore
+*/
+
+/*
+
 */

@@ -10,7 +10,7 @@ if (!token) return res.sendStatus(401);
 
 jwt.verify(token, accessTokenSecret, (err, decoded) => {
 if (err) return res.sendStatus(403); // Invalid/expired token
-req.user = decoded.username; // Attach user to request
+req.user = decoded.id; // Attach user to request
 next();
 });
 };

@@ -63,4 +63,4 @@ const removeFav = async (req, res) => {
 };
 
 
-export {  postHouse ,markFav, removeFav };
+export {  markFav, removeFav };
