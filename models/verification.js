@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 
+
 const verificationSchema = new mongoose.Schema({
   email: { 
     type: String, 
@@ -23,7 +24,6 @@ const verificationSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-// Add TTL index to auto-delete documents after `expiresAt` time passes
-verificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
 
 export default mongoose.model('Verification', verificationSchema);

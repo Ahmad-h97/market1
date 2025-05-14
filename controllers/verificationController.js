@@ -47,14 +47,23 @@ const verifyEmail = async (req, res) => {
       });
     }
 
-    // Passed: update user and delete the verification record
-    const user = await User.findOneAndUpdate(
-      { email },
-      { isVerified: true },
-      { new: true }
+
+       const { username, password } = record;
+
+       const user = new User({ username, email, password});
+    await user.save();
+
+       const refreshToken = jwt.sign(
+      { id: user._id },
+      env.REFRESH_TOKEN_SECRET,
+      { expiresIn: '7d' }
     );
 
-    await Verification.deleteOne({ email });
+  user.refreshToken = refreshToken;
+await user.save();
+ 
+     await Verification.deleteOne({ email });
+
 
     // Create tokens
     const accessToken = jwt.sign(
@@ -63,14 +72,7 @@ const verifyEmail = async (req, res) => {
       { expiresIn: '15m' }
     );
 
-    const refreshToken = jwt.sign(
-      { id: user._id },
-      env.REFRESH_TOKEN_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    user.refreshToken = refreshToken;
-    await user.save();
+    
 
     // Send refresh token as secure HTTP-only cookie
     res.cookie('jwt', refreshToken, {

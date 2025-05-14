@@ -1,4 +1,5 @@
 import { env } from '../env.js';  // Correct
+import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
 import Verification from '../models/verification.js';
 import jwt from 'jsonwebtoken';
@@ -13,18 +14,22 @@ const validateEmail = (email) => {
 };
 
 // Inline helper function
-const generateVerificationCode = async (email) => {
+const generateVerificationCode = async (email,password,username) => {
   const code = Math.floor(100000 + Math.random() * 900000).toString();
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes from now
 
-
+ 
+  const hashedpassword = await bcrypt.hash(password, 10);
+  
 
   await Verification.findOneAndUpdate(
-    { username },
-    { password },
     { email },
-    { code, expiresAt, attempts: 0 },
-    { upsert: true, new: true }
+    { username ,
+      password: hashedpassword,
+      code,
+      expiresAt,
+      attempts: 0 },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
   await sendVerificationEmail(email, code);
@@ -89,18 +94,18 @@ const registerUser = async (req, res) => {
 
 
 
-    const user = new User({ username, email, password,isVerified: false });
-    await user.save();
+    //const user = new User({ username, email, password,isVerified: false });
+    //await user.save();
 
 
      // Generate and send verification code
-    await generateVerificationCode(email);
+    await generateVerificationCode(email,password,username);
 
     res.status(201).json({
       success: true,
       message: 'Verification code sent to email',
       nextStep: '/verify-email',
-      user: { id: user._id, username: user.username }
+
     });
 
     
@@ -211,6 +216,14 @@ const refreshToken = jwt.sign(
 
 user.refreshToken = refreshToken;
 await user.save();
+
+// Send refresh token as secure HTTP-only cookie
+    res.cookie('jwt', refreshToken, {
+      httpOnly: true,
+      secure: true, // Set to false in development if not using HTTPS
+      sameSite: 'None', // Or 'Lax' if your frontend is on the same domain
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
 
     // 3. Success
       res.status(200).json({
