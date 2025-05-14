@@ -1,5 +1,5 @@
 import express from 'express';
-import { verifyJWT } from '../middleware/verifyJWT.js';
+import verifyJWT from '../middleware/verifyJWT.js';
 import { 
   getAllHouses, getHouseDetails,postHouse, editHouse, deleteHouse, upsertReview, deleteReview 
 } from '../controllers/houseController.js';
