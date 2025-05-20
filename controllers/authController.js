@@ -6,11 +6,12 @@ import jwt from 'jsonwebtoken';
 import validator from 'validator';//to validate email ,password,url,etc....
 import { sendVerificationEmail } from '../services/emailServices.js';
 
-const validateEmail = (email) => {
-  if (!validator.isEmail(email)) {
+
+const validateEmail = (Email) => {
+  if (!validator.isEmail(Email)) {
     throw new Error("Invalid email format. Example: user@example.com");
   }
-  return validator.normalizeEmail(email); // This will clean the email
+  return validator.normalizeEmail(Email); // This will clean the email
 };
 
 // Inline helper function
@@ -21,6 +22,9 @@ const generateVerificationCode = async (email,password,username) => {
  
   const hashedpassword = await bcrypt.hash(password, 10);
   
+  await sendVerificationEmail(email, code);
+  
+
 
   await Verification.findOneAndUpdate(
     { email },
@@ -28,11 +32,12 @@ const generateVerificationCode = async (email,password,username) => {
       password: hashedpassword,
       code,
       expiresAt,
-      attempts: 0 },
+      attempts: 0,
+      $inc: { codeRequestCount: 1 },},
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
-  await sendVerificationEmail(email, code);
+  
 };
 
 const registerUser = async (req, res) => {
@@ -47,12 +52,12 @@ const registerUser = async (req, res) => {
       });
     }
 
-     const { username, email, password } = req.body;
+     const { username, Email, password } = req.body;
 
 
      const missingFields = [];
     if (!username) missingFields.push("username");
-    if (!email) missingFields.push("email");
+    if (!Email) missingFields.push("email");
     if (!password) missingFields.push("password");
 
     if (missingFields.length > 0) {
@@ -66,7 +71,7 @@ const registerUser = async (req, res) => {
 
 
 
-    const cleanemail = validateEmail(email); // change variable  name latter to avoid conflict 
+    const email = validateEmail(Email); // change variable  name latter to avoid conflict 
     
       const existingUser = await User.findOne({ 
       $or: [{ email }, { username }] 
@@ -92,11 +97,14 @@ const registerUser = async (req, res) => {
       });
     }
 
+      const existing = await Verification.findOne({ email });
 
-
-    //const user = new User({ username, email, password,isVerified: false });
-    //await user.save();
-
+    if (existing && existing.codeRequestCount >= 3) {
+      return res.status(401).json({
+        success: false,
+        error: "too many tries , try again after 15 minutes",
+      });
+    }
 
      // Generate and send verification code
     await generateVerificationCode(email,password,username);
@@ -109,46 +117,14 @@ const registerUser = async (req, res) => {
     });
 
     
-
-     // generate tokens
-/*
-    const accessToken = jwt.sign(
-        { id: user._id },
-        env.ACCESS_TOKEN_SECRET,
-        { expiresIn: '15m' }
-        );
-
-
-    const refreshToken = jwt.sign(
-        { id: user._id },
-        env.REFRESH_TOKEN_SECRET,
-        { expiresIn: '7d' }
-        );
-            
-    user.refreshToken = refreshToken;
-    await user.save();
-
-    res.cookie('jwt', refreshToken, {
-        httpOnly: true,  // Cookie inaccessible to JavaScript
-        secure: true,    // Only sent over HTTPS
-        sameSite: 'None',   // Allows cross-site requests
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-        });
-
-
-    res.status(201).json({
-        success: true,
-        accessToken,
-        message: 'Registration successful',
-        user: { id: user._id, username: user.username}
-
-        });
-          */  
-
-    
   } catch (err) {
     console.error("Registration error:", err);  // Log the error message
-    res.status(500).json({ message: 'register Error' });
+   res.status(500).json({ 
+  success: false,
+  error: 'Registration failed',
+  message: err.message, // the error string (e.g. "Cannot read properties of null")
+  stack: process.env.NODE_ENV === 'development' ? err.stack : undefined // optional for debugging
+});
   }
 };
 
@@ -242,5 +218,33 @@ await user.save();
   }
 };
 
+const refreshToken = async (req, res) => {
+  const cookies = req.cookies;
+  if (!cookies?.jwt) return res.sendStatus(401); // No cookie
 
-export { registerUser, loginUser };
+  const refreshToken = cookies.jwt;
+  try {
+    const foundUser = await User.findOne({ refreshToken });
+
+   
+    if (!foundUser) return res.sendStatus(403); // Forbidden
+   
+    jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET, (err, decoded) => {
+      if (err || foundUser._id.toString() !== decoded.id) return res.sendStatus(403);
+
+      const accessToken = jwt.sign(
+        { id: foundUser._id,  },
+        process.env.ACCESS_TOKEN_SECRET,
+        { expiresIn: '15h' }
+      );
+
+      res.json({ accessToken });
+    });
+  } catch (err) {
+    console.error("Refresh token error:", err);
+    res.sendStatus(500);
+  }
+};
+
+
+export { registerUser, loginUser,refreshToken };

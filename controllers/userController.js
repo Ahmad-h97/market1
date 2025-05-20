@@ -8,7 +8,8 @@ import House from '../models/House.js';
 
 
 const markFav = async (req, res) => {
-  const { userId, houseId } = req.params;
+  const { houseId } = req.params;
+  const userId = req.user.id;
 
   try {
     const user = await User.findById(userId);
@@ -34,7 +35,8 @@ const markFav = async (req, res) => {
 
 
 const removeFav = async (req, res) => {
-  const { userId, houseId } = req.params;
+  const { houseId } = req.params;
+  const userId = req.user.id;
 
   try {
     const user = await User.findById(userId);

@@ -55,7 +55,7 @@ const verifyEmail = async (req, res) => {
 
        const refreshToken = jwt.sign(
       { id: user._id },
-      env.REFRESH_TOKEN_SECRET,
+      process.env.REFRESH_TOKEN_SECRET,
       { expiresIn: '7d' }
     );
 
@@ -68,7 +68,7 @@ await user.save();
     // Create tokens
     const accessToken = jwt.sign(
       { id: user._id },
-      env.ACCESS_TOKEN_SECRET,
+      process.env.ACCESS_TOKEN_SECRET,
       { expiresIn: '15m' }
     );
 

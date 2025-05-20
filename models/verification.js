@@ -9,6 +9,7 @@ const verificationSchema = new mongoose.Schema({
   },
    username: { type: String, required: true,unique: true },
   password: { type: String, required: true },
+  codeRequestCount: { type: Number, default: 1 },
   code: { 
     type: String, 
     required: true 
