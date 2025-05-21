@@ -3,6 +3,7 @@ export const getPublicHouseDetails = (house) => {
     id: house._id,
     title: house.title,
     location: house.location,
+    images: house.images,
     // Other non-sensitive fields
   };
 };
