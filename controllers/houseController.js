@@ -9,6 +9,16 @@ import {
 const getAllHouses = async (req, res) => {
   try {
 
+      // Get page and limit from query params, default to page=1, limit=10
+    const page = parseInt(req.query.page) || 1;
+    let limit = parseInt(req.query.limit) || 10;
+      const maxLimit = 20;
+      if (limit > maxLimit) limit = maxLimit;
+
+     // Calculate how many documents to skip
+    const skip = (page - 1) * limit;
+
+
     const { location, title, maxPrice, minPrice, date } = req.query;
 
     const filter = {};
@@ -35,12 +45,24 @@ const getAllHouses = async (req, res) => {
 
       
 
-
-     const houses = await House.find(filter).populate('postedBy', 'username email');
+    const [houses, total] = await Promise.all([
+       House.find(filter)
+       .populate('postedBy', 'username email')
+       .sort({createdAt:-1})
+       .skip(skip)
+       .limit(limit),
+      House.countDocuments(filter)
+    ]);
     
     const mapper = res.locals.showFullDetails ? getPrivateHouseDetails : getPublicHouseDetails;
 
-    res.status(200).json(houses.map(mapper));
+    res.status(200).json({
+      data:houses.map(mapper),
+      page,
+      limit,
+      total,
+      totalpages:Math.ceil(total/limit)
+    });
 
   } catch (err) {
     console.error('Get Houses Error:', err);
@@ -90,11 +112,7 @@ console.log(userId)
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-     const isOwner = house.postedBy.equals(req.user.id);
-
-     if (!isOwner) {
-      return res.status(403).json({ error: 'Forbidden - You can only edit your own listings' });
-    }
+    
 
     
     // 2. Create new house
