@@ -57,7 +57,7 @@ const registerUser = async (req, res) => {
 
      const missingFields = [];
     if (!username) missingFields.push("username");
-    if (!Email) missingFields.push("email");
+    if (!Email) missingFields.push("Email");
     if (!password) missingFields.push("password");
 
     if (missingFields.length > 0) {
@@ -133,7 +133,7 @@ const loginUser = async (req, res) => {
   
 
   try {
-
+    console.log(req.body);
      if (!req.body || Object.keys(req.body).length === 0) {
       return res.status(400).json({
         success: false,
@@ -173,11 +173,15 @@ const loginUser = async (req, res) => {
 
    
      // 2. Check password using bcrypt
+     console.log('Password entered:', password);
+console.log('Stored hash:', user.password);
     const isMatch = await user.comparePassword(password);
+    
     if (!isMatch) {
-      return res.status(401).json({ success: false, error: 'Invalid password' });
+      console.log(isMatch)
+      return res.status(402).json({ success: false, error: 'Invalid password' });
     }
-
+    // return it to 401 later s
     const accessToken = jwt.sign(
   { id: user._id },
   env.ACCESS_TOKEN_SECRET,
@@ -235,10 +239,12 @@ const refreshToken = async (req, res) => {
       const accessToken = jwt.sign(
         { id: foundUser._id,  },
         process.env.ACCESS_TOKEN_SECRET,
-        { expiresIn: '15h' }
+        { expiresIn: '15m' }
       );
 
-      res.json({ accessToken });
+      res.json({ accessToken,
+        foundUser
+      });
     });
   } catch (err) {
     console.error("Refresh token error:", err);
@@ -246,5 +252,15 @@ const refreshToken = async (req, res) => {
   }
 };
 
+const LogoutUser = (req, res) => {
+  res.clearCookie('refreshToken', {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'None',
+  });
 
-export { registerUser, loginUser,refreshToken };
+  res.status(200).json({ message: 'Logged out successfully' });
+};
+
+
+export { registerUser, loginUser,refreshToken,LogoutUser };

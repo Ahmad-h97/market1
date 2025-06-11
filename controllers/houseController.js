@@ -70,12 +70,81 @@ const getAllHouses = async (req, res) => {
   }
 };
 
+const getUserHouses =async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    
+      // Get page and limit from query params, default to page=1, limit=10
+    const page = parseInt(req.query.page) || 1;
+    let limit = parseInt(req.query.limit) || 10;
+      const maxLimit = 20;
+      if (limit > maxLimit) limit = maxLimit;
+
+     // Calculate how many documents to skip
+    const skip = (page - 1) * limit;
+
+
+    const { location, title, maxPrice, minPrice, date } = req.query;
+
+    const filter = {postedBy: userId};
+
+    
+    if (location) {
+        filter.location = { $regex: location, $options: 'i' }; // case-insensitive
+      }
+  
+      if (title) {
+        filter.title = { $regex: title, $options: 'i' }; // case-insensitive
+      }
+  
+      if (maxPrice || minPrice) {
+        filter.price = {};
+        if (minPrice) filter.price.$gte = Number(minPrice);
+        if (maxPrice) filter.price.$lte = Number(maxPrice);
+      }
+  
+      if (date) {
+        const parsedDate = new Date(date);
+        filter.createdAt = { $gte: parsedDate };
+      }
+
+      
+
+    const [houses, total] = await Promise.all([
+       House.find(filter)
+       .populate('postedBy', 'username email')
+       .sort({createdAt:-1})
+       .skip(skip)
+       .limit(limit),
+      House.countDocuments(filter)
+    ]);
+    
+    const mapper = res.locals.showFullDetails ? getPrivateHouseDetails : getPublicHouseDetails;
+
+    res.status(200).json({
+      data:houses.map(mapper),
+      page,
+      limit,
+      total,
+      totalpages:Math.ceil(total/limit)
+    });
+
+  } catch (err) {
+    console.error('Get Houses Error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+}
+
+
 const getHouseDetails = async (req, res) => {
   try {
+
     const house = await House.findById(req.params.id)
+    
       .populate('postedBy', 'username email')
       .populate('reviews.user', 'username email');
-
+    console.log(house);
     if (!house) {
       return res.status(404).json({ error: 'House not found' });
     }
@@ -139,26 +208,29 @@ console.log(userId)
 };
 
 const editHouse = async (req, res) => {
+  console.log("req start ....." ,req.body,req.files,"req end ")
   const { houseId } = req.params;
-  const { title, description, location, price, removeImages = [] } = req.body;
-
+  const { title, description, location, price = [] } = req.body;
+  const existingUrls = JSON.parse(req.body.existingUrls);
+  const imagesToRemove =0;
+  console.log(existingUrls)
   try {
     const userId = req.user.id;
 
     const house = await House.findById(houseId);
     if (!house) 
       return res.status(404).json({ error: `House with ID ${houseId} not found` });
-
+console.log( house.images)
     if (house.postedBy.toString() !== userId.toString()) 
       return res.status(403).json ("User does not own this house");
    
     
     // 2. Calculate image changes
-    const currentImages = house.images.length;
-    const imagesToRemove = removeImages.length;
+    const currentImages = existingUrls.length;
+    
     const newImagesToAdd = req.files?.length || 0;
     const finalImageCount = currentImages - imagesToRemove + newImagesToAdd;
-
+console.log('123')
     // 3. Validate image count
     if (finalImageCount > 3) {
       return res.status(400).json({
@@ -168,12 +240,12 @@ const editHouse = async (req, res) => {
         wouldBeCount: finalImageCount
       });
     }
-
+console.log('123')
     
     // 4. Process image removal (database only)
-    if (removeImages.length) {
-      house.images = house.images.filter(imgUrl => !removeImages.includes(imgUrl));
-    }
+    console.log(existingUrls)
+      house.images = house.images.filter(imgUrl => existingUrls.includes(imgUrl));
+   
 
     
     // 5. Add new images (if any)
@@ -314,7 +386,7 @@ const deleteReview = async (req, res) => {
   }
 };
 
-export { getAllHouses, getHouseDetails,postHouse, editHouse ,deleteHouse , deleteReview, upsertReview };
+export { getAllHouses,getUserHouses, getHouseDetails,postHouse, editHouse ,deleteHouse , deleteReview, upsertReview };
 
 
 /*

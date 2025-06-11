@@ -5,13 +5,17 @@ const { accessTokenSecret } = jwtConfig;
 
 const verifyJWT = (req, res, next) => {
   const authHeader = req.headers.authorization || req.headers.Authorization;
-  if (!authHeader?.startsWith('Bearer ')) return res.sendStatus(401); // Better safety
+  if (!authHeader?.startsWith('Bearer ')) {
+    return res.status(401).json({ message: 'Missing or malformed token' });
+  }
 
   const token = authHeader.split(' ')[1];
 
   jwt.verify(token, accessTokenSecret, (err, decoded) => {
-    if (err) return res.sendStatus(403); // Token invalid or expired
-
+    console.log('🛡️  JWT Middleware:', { token, decoded, error: err });
+   if (err) {
+      return res.status(401).json({ message: 'Token is invalid or expired' });
+    }
       req.user = {
       id: decoded.id,
       role: decoded.role || 'user',  // default if needed

@@ -50,7 +50,7 @@ const verifyEmail = async (req, res) => {
 
        const { username, password } = record;
 
-       const user = new User({ username, email, password});
+       const user = new User({ username, email, password,skipHashing: true,});
     await user.save();
 
        const refreshToken = jwt.sign(

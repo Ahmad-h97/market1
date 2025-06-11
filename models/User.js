@@ -8,12 +8,18 @@ const userSchema = new mongoose.Schema({
   refreshToken: { type: String, default: '' },
   postedHouses: [{ type: mongoose.Schema.Types.ObjectId, ref: 'House' }],
   favorites:        [{ type: mongoose.Schema.Types.ObjectId, ref: 'House' }],
+   skipHashing: { type: Boolean, select: false }, 
 }, { timestamps: true });
 
 
 userSchema.pre('save', async function (next) {
+  if (this.skipHashing) return next();
+
   if (!this.isModified('password')) return next();
+  
+  console.log('[HOOK] Password before hashing:', this.password); 
   this.password = await bcrypt.hash(this.password, 10);
+   console.log('[HOOK] Hashed password:', this.password);
   next();
   });
   
