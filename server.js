@@ -14,6 +14,7 @@ const app = express();
 
 // --- CORS Setup ---
 const allowedOrigins = [
+  'https://syrian-market-frontend1.vercel.app',
   'http://localhost:5173', // your frontend during development
   'https://your-production-frontend.com' // your deployed frontend
 ];
