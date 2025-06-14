@@ -21,47 +21,89 @@ const getAllHouses = async (req, res) => {
 
     const { location, title, maxPrice, minPrice, date } = req.query;
 
-    const filter = {};
+    const match = {};
 
     
     if (location) {
-        filter.location = { $regex: location, $options: 'i' }; // case-insensitive
+        match.location = { $regex: location, $options: 'i' }; // case-insensitive
       }
   
       if (title) {
-        filter.title = { $regex: title, $options: 'i' }; // case-insensitive
+        match.title = { $regex: title, $options: 'i' }; // case-insensitive
       }
   
       if (maxPrice || minPrice) {
-        filter.price = {};
-        if (minPrice) filter.price.$gte = Number(minPrice);
-        if (maxPrice) filter.price.$lte = Number(maxPrice);
+        match.price = {};
+        if (minPrice) match.price.$gte = Number(minPrice);
+        if (maxPrice) match.price.$lte = Number(maxPrice);
       }
   
       if (date) {
         const parsedDate = new Date(date);
-        filter.createdAt = { $gte: parsedDate };
+        match.createdAt = { $gte: parsedDate };
       }
 
+      let userCity = null;
       
+   if (req.user?.id) {
+  const user = await User.findById(req.user.id).select('city');
+  userCity = user?.city || null;
+}
+   
+       if (location) {
+      userCity = null;
+    }
+// 5. Build aggregation pipeline
+    const pipeline = [
+      { $match: match },
+    ];
 
-    const [houses, total] = await Promise.all([
-       House.find(filter)
-       .populate('postedBy', 'username email')
-       .sort({createdAt:-1})
-       .skip(skip)
-       .limit(limit),
-      House.countDocuments(filter)
-    ]);
-    
-    const mapper = res.locals.showFullDetails ? getPrivateHouseDetails : getPublicHouseDetails;
+    if (userCity) {
+      // 6. If user didn't filter by location, boost home city houses
+      pipeline.push(
+        {
+          $addFields: {
+            iscity: {
+              $cond: [{ $eq: ["$location", userCity] }, 1, 0]
+            }
+          }
+        },
+        {
+          $sort: { iscity: -1, createdAt: -1 }
+        }
+      );
+    } else {
+      // 7. Just sort by newest
+      pipeline.push({ $sort: { createdAt: -1 } });
+    }
 
+    // 8. Add pagination
+    pipeline.push({ $skip: skip }, { $limit: limit });
+
+    // 9. Run aggregation
+    let houses = await House.aggregate(pipeline);
+
+    // 10. Count total (without skip/limit)
+    const total = await House.countDocuments(match);
+
+    // 11. Populate postedBy (after aggregation)
+    houses = await House.populate(houses, {
+      path: 'postedBy',
+      select: 'username email'
+    });
+
+    // 12. Choose what fields to return
+    const mapper = res.locals.showFullDetails
+      ? getPrivateHouseDetails
+      : getPublicHouseDetails;
+
+    // 13. Send response
     res.status(200).json({
-      data:houses.map(mapper),
+      data: houses.map(mapper),
       page,
       limit,
       total,
-      totalpages:Math.ceil(total/limit)
+      totalPages: Math.ceil(total / limit)
     });
 
   } catch (err) {
@@ -139,8 +181,8 @@ const getUserHouses =async (req, res) => {
 
 const getHouseDetails = async (req, res) => {
   try {
-
-    const house = await House.findById(req.params.id)
+console.log(req.params.houseId)
+    const house = await House.findById(req.params.houseId)
     
       .populate('postedBy', 'username email')
       .populate('reviews.user', 'username email');

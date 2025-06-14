@@ -15,7 +15,7 @@ const validateEmail = (Email) => {
 };
 
 // Inline helper function
-const generateVerificationCode = async (email,password,username) => {
+const generateVerificationCode = async (email,password,username,city) => {
   const code = Math.floor(100000 + Math.random() * 900000).toString();
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes from now
 
@@ -24,11 +24,20 @@ const generateVerificationCode = async (email,password,username) => {
   
   await sendVerificationEmail(email, code);
   
+ console.log("Saving to Verification collection:", {
+    email,
+    username,
+    city,
+    password: hashedpassword,
+    code,
+    expiresAt
+  });
 
 
   await Verification.findOneAndUpdate(
     { email },
     { username ,
+      city,
       password: hashedpassword,
       code,
       expiresAt,
@@ -43,7 +52,7 @@ const generateVerificationCode = async (email,password,username) => {
 const registerUser = async (req, res) => {
  
   try {
-
+ 
      if (!req.body || Object.keys(req.body).length === 0) {
       return res.status(400).json({
         success: false,
@@ -52,13 +61,14 @@ const registerUser = async (req, res) => {
       });
     }
 
-     const { username, Email, password } = req.body;
-
+     const { username, Email, password,city } = req.body;
+    console.log(city)
 
      const missingFields = [];
     if (!username) missingFields.push("username");
     if (!Email) missingFields.push("Email");
     if (!password) missingFields.push("password");
+    if (!city) missingFields.push("city");
 
     if (missingFields.length > 0) {
       return res.status(400).json({
@@ -107,7 +117,7 @@ const registerUser = async (req, res) => {
     }
 
      // Generate and send verification code
-    await generateVerificationCode(email,password,username);
+    await generateVerificationCode(email,password,username,city);
 
     res.status(201).json({
       success: true,
