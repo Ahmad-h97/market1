@@ -8,7 +8,8 @@ import {
 
 const getAllHouses = async (req, res) => {
   try {
-
+    console.log(req.params)
+    console.log(req.query)
       // Get page and limit from query params, default to page=1, limit=10
     const page = parseInt(req.query.page) || 1;
     let limit = parseInt(req.query.limit) || 10;
@@ -19,7 +20,7 @@ const getAllHouses = async (req, res) => {
     const skip = (page - 1) * limit;
 
 
-    const { location, title, maxPrice, minPrice, date } = req.query;
+    const { location, title, maxPrice, minPrice, timeAmount, timeUnit } = req.query;
 
     const match = {};
 
@@ -37,12 +38,39 @@ const getAllHouses = async (req, res) => {
         if (minPrice) match.price.$gte = Number(minPrice);
         if (maxPrice) match.price.$lte = Number(maxPrice);
       }
-  
-      if (date) {
-        const parsedDate = new Date(date);
-        match.createdAt = { $gte: parsedDate };
-      }
 
+
+      if (timeAmount && timeUnit) {
+  const now = new Date();
+  const amount = parseInt(timeAmount, 10);
+  const cutoff = new Date(now);
+
+  switch (timeUnit) {
+    case "minutes":
+      cutoff.setMinutes(now.getMinutes() - amount);
+      break;
+    case "hours":
+      cutoff.setHours(now.getHours() - amount);
+      break;
+    case "days":
+      cutoff.setDate(now.getDate() - amount);
+      break;
+    case "weeks":
+      cutoff.setDate(now.getDate() - amount * 7);
+      break;
+    case "months":
+      cutoff.setMonth(now.getMonth() - amount);
+      break;
+    case "years":
+      cutoff.setFullYear(now.getFullYear() - amount);
+      break;
+    default:
+      break;
+  }
+ match.createdAt = { $gte: cutoff };}
+
+ 
+  
       let userCity = null;
       
    if (req.user?.id) {
