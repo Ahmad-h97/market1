@@ -8,8 +8,7 @@ import {
 
 const getAllHouses = async (req, res) => {
   try {
-    console.log(req.params)
-    console.log(req.query)
+    
       // Get page and limit from query params, default to page=1, limit=10
     const page = parseInt(req.query.page) || 1;
     let limit = parseInt(req.query.limit) || 10;
@@ -18,12 +17,19 @@ const getAllHouses = async (req, res) => {
 
      // Calculate how many documents to skip
     const skip = (page - 1) * limit;
-
+    console.log(req.query)
 
     const { location, title, maxPrice, minPrice, timeAmount, timeUnit } = req.query;
-
+    const categoriesQuery = req.query.interestedCategories;
+    console.log(categoriesQuery)
     const match = {};
 
+    if (categoriesQuery) {
+  const categories = Array.isArray(categoriesQuery)
+    ? categoriesQuery
+    : categoriesQuery.split(',');
+  match.category = { $in: categories };
+}
     
     if (location) {
         match.location = { $regex: location, $options: 'i' }; // case-insensitive
@@ -67,7 +73,8 @@ const getAllHouses = async (req, res) => {
     default:
       break;
   }
- match.createdAt = { $gte: cutoff };}
+ match.createdAt = { $gte: cutoff };
+}
 
  
   
@@ -231,7 +238,9 @@ console.log(req.params.houseId)
 };
 
 const postHouse = async (req, res) => {
-  const { title,description, location, price } = req.body;
+  
+
+  const { title,description, location, price, category } = req.body;
 
   if (req.files.length > 3) {
     return res.status(400).json({ error: 'Maximum of 3 images allowed.' });
@@ -251,8 +260,18 @@ console.log(userId)
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
+    const categories= [
+  "real estate",
+  "electronics",
+  "phones & PC",
+  "clothes",
+  "services",
+  "vehicles"
+];
     
-
+ if (!categories.includes(category)) {
+      return res.status(400).json({ message: 'Invalid category' });
+    }
     
     // 2. Create new house
     const newHouse = new House({
@@ -260,6 +279,7 @@ console.log(userId)
       description,
       location,
       price,
+      category,
       images: imageUrls,
       postedBy: user._id
     });
@@ -280,7 +300,7 @@ console.log(userId)
 const editHouse = async (req, res) => {
   console.log("req start ....." ,req.body,req.files,"req end ")
   const { houseId } = req.params;
-  const { title, description, location, price = [] } = req.body;
+  const { title, description, location,category, price = [] } = req.body;
   const existingUrls = JSON.parse(req.body.existingUrls);
   const imagesToRemove =0;
   console.log(existingUrls)
@@ -334,6 +354,7 @@ console.log('123')
     if (title) house.title = title;
     if (description) house.description = description;
     if (location) house.location = location;
+    if (category) house.category = category;
     if (price) house.price = price;
 
     await house.save();

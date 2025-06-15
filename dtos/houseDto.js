@@ -4,6 +4,7 @@ export const getPublicHouseDetails = (house) => {
     title: house.title,
     description: house.description,
     location: house.location,
+    category: house.category,
      images: Array.isArray(house.images) ? house.images : [],
     // Other non-sensitive fields
   };

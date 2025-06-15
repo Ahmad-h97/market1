@@ -18,6 +18,7 @@ const houseSchema = new mongoose.Schema({
   description: { type: String, required: true },
   price: { type: Number, required: true },
   location: { type: String, required: true },
+  category:{ type: String ,require : true},
   images: {
     type: [{ type: String }],
     validate: [arrayLimit, 'Cannot upload more than 3 images']
