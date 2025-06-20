@@ -15,7 +15,7 @@ const validateEmail = (Email) => {
 };
 
 // Inline helper function
-const generateVerificationCode = async (email,password,username,city) => {
+const generateVerificationCode = async (email,password,username,city,profileImage) => {
   const code = Math.floor(100000 + Math.random() * 900000).toString();
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes from now
 
@@ -24,20 +24,14 @@ const generateVerificationCode = async (email,password,username,city) => {
   
   await sendVerificationEmail(email, code);
   
- console.log("Saving to Verification collection:", {
-    email,
-    username,
-    city,
-    password: hashedpassword,
-    code,
-    expiresAt
-  });
+ 
 
 
   await Verification.findOneAndUpdate(
     { email },
     { username ,
       city,
+      profileImage,
       password: hashedpassword,
       code,
       expiresAt,
@@ -52,6 +46,7 @@ const generateVerificationCode = async (email,password,username,city) => {
 const registerUser = async (req, res) => {
  
   try {
+    console.log("register info ",req.file)
  
      if (!req.body || Object.keys(req.body).length === 0) {
       return res.status(400).json({
@@ -116,8 +111,10 @@ const registerUser = async (req, res) => {
       });
     }
 
+    const profileImage = req.file?.path || null;
+    console.log("profileImage",profileImage)
      // Generate and send verification code
-    await generateVerificationCode(email,password,username,city);
+    await generateVerificationCode(email,password,username,city,profileImage);
 
     res.status(201).json({
       success: true,
@@ -224,6 +221,7 @@ await user.save();
         user: {
           id: user._id,
           username: user.username,
+          profileImage: user.profileImage
             }
       });
 } catch (err) {

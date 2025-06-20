@@ -64,5 +64,37 @@ const removeFav = async (req, res) => {
   }
 };
 
+const toggleFollow = async (req, res) => {
+  const followerId = req.user.id;
+  const followingId = req.params.id;
 
-export {  markFav, removeFav };
+  if (followerId === followingId)
+    return res.status(400).json({ error: "Can't follow yourself" });
+
+  const follower = await User.findById(followerId);
+  const following = await User.findById(followingId);
+
+  if (!follower || !following)
+    return res.status(404).json({ error: 'User not found' });
+
+  const isFollowing = follower.following.includes(followingId);
+
+  if (isFollowing) {
+    // Unfollow
+    follower.following.pull(followingId);
+    following.followers.pull(followerId);
+    await follower.save();
+    await following.save();
+    return res.json({ isFollowing: false });
+  } else {
+    // Follow
+    follower.following.push(followingId);
+    following.followers.push(followerId);
+    await follower.save();
+    await following.save();
+    return res.json({ isFollowing: true });
+  }
+};
+
+
+export {  markFav, removeFav,toggleFollow };

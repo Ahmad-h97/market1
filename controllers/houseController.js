@@ -124,17 +124,37 @@ const getAllHouses = async (req, res) => {
     // 11. Populate postedBy (after aggregation)
     houses = await House.populate(houses, {
       path: 'postedBy',
-      select: 'username email'
+      select: 'username email profileImage'
     });
+
+        let followingSet = new Set();
+
+if (req.user?.id) {
+  const currentUser = await User.findById(req.user.id).select('following');
+  followingSet = new Set(currentUser.following.map(id => id.toString()));
+}
+
 
     // 12. Choose what fields to return
     const mapper = res.locals.showFullDetails
       ? getPrivateHouseDetails
       : getPublicHouseDetails;
 
+
+  
+const data = houses.map((house) => {
+      const mapped = mapper(house);
+      const postedById = house.postedBy?._id?.toString();
+      return {
+        ...mapped,
+        isFollowing: followingSet.has(postedById),
+      };
+    });
+
+
     // 13. Send response
     res.status(200).json({
-      data: houses.map(mapper),
+      data,
       page,
       limit,
       total,
@@ -147,7 +167,7 @@ const getAllHouses = async (req, res) => {
   }
 };
 
-const getUserHouses =async (req, res) => {
+const getMyHouses =async (req, res) => {
   try {
     const userId = req.user.id;
 
@@ -213,6 +233,73 @@ const getUserHouses =async (req, res) => {
   }
 }
 
+
+const getUserHouses =async (req, res) => {
+  try {
+    const userId =  req.params.userId;;
+
+    
+      // Get page and limit from query params, default to page=1, limit=10
+    const page = parseInt(req.query.page) || 1;
+    let limit = parseInt(req.query.limit) || 10;
+      const maxLimit = 20;
+      if (limit > maxLimit) limit = maxLimit;
+
+     // Calculate how many documents to skip
+    const skip = (page - 1) * limit;
+
+
+    const { location, title, maxPrice, minPrice, date } = req.query;
+
+    const filter = {postedBy: userId};
+
+    
+    if (location) {
+        filter.location = { $regex: location, $options: 'i' }; // case-insensitive
+      }
+  
+      if (title) {
+        filter.title = { $regex: title, $options: 'i' }; // case-insensitive
+      }
+  
+      if (maxPrice || minPrice) {
+        filter.price = {};
+        if (minPrice) filter.price.$gte = Number(minPrice);
+        if (maxPrice) filter.price.$lte = Number(maxPrice);
+      }
+  
+      if (date) {
+        const parsedDate = new Date(date);
+        filter.createdAt = { $gte: parsedDate };
+      }
+
+      
+
+    const [houses, total] = await Promise.all([
+       House.find(filter)
+       .populate('postedBy', 'username email')
+       .sort({createdAt:-1})
+       .skip(skip)
+       .limit(limit),
+      House.countDocuments(filter)
+    ]);
+    
+    const mapper = res.locals.showFullDetails ? getPrivateHouseDetails : getPublicHouseDetails;
+
+    res.status(200).json({
+      data:houses.map(mapper),
+      page,
+      limit,
+      total,
+      totalpages:Math.ceil(total/limit)
+    });
+
+  } catch (err) {
+    console.error('Get Houses Error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+  
+}
 
 const getHouseDetails = async (req, res) => {
   try {
@@ -477,7 +564,7 @@ const deleteReview = async (req, res) => {
   }
 };
 
-export { getAllHouses,getUserHouses, getHouseDetails,postHouse, editHouse ,deleteHouse , deleteReview, upsertReview };
+export { getAllHouses,getMyHouses,getUserHouses, getHouseDetails,postHouse, editHouse ,deleteHouse , deleteReview, upsertReview };
 
 
 /*

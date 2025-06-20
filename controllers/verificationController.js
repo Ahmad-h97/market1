@@ -48,9 +48,9 @@ const verifyEmail = async (req, res) => {
     }
 
 
-       const { username, password,city } = record;
+       const { username, password,city,profileImage } = record;
 
-       const user = new User({ username, email, password,city,skipHashing: true,});
+       const user = new User({ username, email, password,city,profileImage,skipHashing: true,});
     await user.save();
 
        const refreshToken = jwt.sign(
@@ -89,7 +89,8 @@ await user.save();
       user: {
         id: user._id,
         username: user.username,
-        email: user.email
+        email: user.email,
+        profileImage: user.profileImage
       }
     });
 

@@ -17,8 +17,8 @@ export const getPrivateHouseDetails = (house) => {
     postedBy: {
       username: house.postedBy?.username,
       id: house.postedBy?._id?.toString(),
-      email: house.postedBy?.email
-      
+      email: house.postedBy?.email,
+      profileImage: house.postedBy?.profileImage || null, 
     }
     // Other sensitive fields
   };

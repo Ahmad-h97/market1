@@ -5,12 +5,13 @@ import cloudinary from '../config/cloudinary.js';
 const storage = new CloudinaryStorage({
   cloudinary,
   params: {
-    folder: 'home-market', // optional folder name in Cloudinary
+    folder: 'home-market/profile-pics',
     allowed_formats: ['jpg', 'jpeg', 'png']
   }
 });
 
 
 const uploadMultiple = multer({ storage }).array('images', 3);
+const uploadProfileImage = multer({ storage }).single('profileImage');
 
-export default uploadMultiple;
+export { uploadMultiple, uploadProfileImage };

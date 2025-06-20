@@ -6,6 +6,11 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   city: { type: String},
+  profileImage: {
+    type: String,
+  },
+  following: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  followers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   refreshToken: { type: String, default: '' },
   postedHouses: [{ type: mongoose.Schema.Types.ObjectId, ref: 'House' }],
   favorites:        [{ type: mongoose.Schema.Types.ObjectId, ref: 'House' }],
