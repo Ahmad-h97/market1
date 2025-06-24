@@ -143,14 +143,13 @@ if (req.user?.id) {
 
   
 const data = houses.map((house) => {
-      const mapped = mapper(house);
-      const postedById = house.postedBy?._id?.toString();
-      return {
-        ...mapped,
-        isFollowing: followingSet.has(postedById),
-      };
-    });
+     const postedById = house.postedBy?._id?.toString();
+  const isFollowing = followingSet.has(postedById);
 
+  return res.locals.showFullDetails
+    ? getPrivateHouseDetails(house, isFollowing)
+    : getPublicHouseDetails(house);
+});
 
     // 13. Send response
     res.status(200).json({
