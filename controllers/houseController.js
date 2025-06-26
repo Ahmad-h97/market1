@@ -232,88 +232,111 @@ const getMyHouses =async (req, res) => {
   }
 }
 
-
-const getUserHouses =async (req, res) => {
+const getUserHouses = async (req, res) => {
   try {
-    const userId =  req.params.userId;;
+    const userId = req.params.userId;
 
-    
-      // Get page and limit from query params, default to page=1, limit=10
     const page = parseInt(req.query.page) || 1;
     let limit = parseInt(req.query.limit) || 10;
-      const maxLimit = 20;
-      if (limit > maxLimit) limit = maxLimit;
-
-     // Calculate how many documents to skip
+    const maxLimit = 20;
+    if (limit > maxLimit) limit = maxLimit;
     const skip = (page - 1) * limit;
 
-
     const { location, title, maxPrice, minPrice, date } = req.query;
+    const filter = { postedBy: userId };
 
-    const filter = {postedBy: userId};
-
-    
     if (location) {
-        filter.location = { $regex: location, $options: 'i' }; // case-insensitive
-      }
-  
-      if (title) {
-        filter.title = { $regex: title, $options: 'i' }; // case-insensitive
-      }
-  
-      if (maxPrice || minPrice) {
-        filter.price = {};
-        if (minPrice) filter.price.$gte = Number(minPrice);
-        if (maxPrice) filter.price.$lte = Number(maxPrice);
-      }
-  
-      if (date) {
-        const parsedDate = new Date(date);
-        filter.createdAt = { $gte: parsedDate };
-      }
+      filter.location = { $regex: location, $options: 'i' };
+    }
 
-      
+    if (title) {
+      filter.title = { $regex: title, $options: 'i' };
+    }
 
-    const [houses, total] = await Promise.all([
-       House.find(filter)
-       .populate('postedBy', 'username email')
-       .sort({createdAt:-1})
-       .skip(skip)
-       .limit(limit),
-      House.countDocuments(filter)
+    if (maxPrice || minPrice) {
+      filter.price = {};
+      if (minPrice) filter.price.$gte = Number(minPrice);
+      if (maxPrice) filter.price.$lte = Number(maxPrice);
+    }
+
+    if (date) {
+      const parsedDate = new Date(date);
+      filter.createdAt = { $gte: parsedDate };
+    }
+
+    // Fetch houses and total count
+    let [houses, total] = await Promise.all([
+      House.find(filter)
+        .populate('postedBy', 'username email profileImage') // ✅ include profileImage
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      House.countDocuments(filter),
     ]);
-    
-    const mapper = res.locals.showFullDetails ? getPrivateHouseDetails : getPublicHouseDetails;
 
+    // ✅ Prepare followingSet (if user is logged in)
+    let followingSet = new Set();
+    if (req.user?.id) {
+      const currentUser = await User.findById(req.user.id).select('following');
+      followingSet = new Set(currentUser.following.map(id => id.toString()));
+    }
+
+    // ✅ Decide which mapper to use
+    const mapper = res.locals.showFullDetails
+      ? getPrivateHouseDetails
+      : getPublicHouseDetails;
+
+    // ✅ Add isFollowing flag per house
+    const data = houses.map(house => {
+      const postedById = house.postedBy?._id?.toString();
+      const isFollowing = followingSet.has(postedById);
+
+      return res.locals.showFullDetails
+        ? getPrivateHouseDetails(house, isFollowing)
+        : getPublicHouseDetails(house);
+    });
+
+    // ✅ Return response
     res.status(200).json({
-      data:houses.map(mapper),
+      data,
       page,
       limit,
       total,
-      totalpages:Math.ceil(total/limit)
+      totalpages: Math.ceil(total / limit),
     });
 
   } catch (err) {
     console.error('Get Houses Error:', err);
     res.status(500).json({ error: 'Server error' });
   }
-  
-}
+};
+
 
 const getHouseDetails = async (req, res) => {
   try {
-console.log(req.params.houseId)
+    console.log(req.params.houseId);
     const house = await House.findById(req.params.houseId)
-    
-      .populate('postedBy', 'username email')
+      .populate('postedBy', 'username email following profileImage') // optionally populate profileImage
       .populate('reviews.user', 'username email');
-    console.log(house);
+
     if (!house) {
       return res.status(404).json({ error: 'House not found' });
     }
 
-     const houseData = req.user 
-      ? getPrivateHouseDetails(house) 
+    let isFollowing = false;
+
+    if (req.user?.id) {
+      // Get current user with following list
+      const currentUser = await User.findById(req.user.id).select('following');
+      const followingSet = new Set(currentUser.following.map(id => id.toString()));
+      const postedById = house.postedBy?._id?.toString();
+
+      isFollowing = followingSet.has(postedById);
+    }
+
+    // Pass isFollowing to your mapper functions (adjust if needed)
+    const houseData = req.user
+      ? getPrivateHouseDetails(house, isFollowing)
       : getPublicHouseDetails(house);
 
     res.json(houseData);
@@ -322,6 +345,7 @@ console.log(req.params.houseId)
     res.status(500).json({ error: 'Server error' });
   }
 };
+
 
 const postHouse = async (req, res) => {
   

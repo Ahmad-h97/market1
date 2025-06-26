@@ -5,6 +5,8 @@ const { accessTokenSecret } = jwtConfig;
 
 const verifyJWT = (req, res, next) => {
   const authHeader = req.headers.authorization || req.headers.Authorization;
+    console.log('🔐 Authorization Header:', authHeader);
+  
   if (!authHeader?.startsWith('Bearer ')) {
     return res.status(401).json({ message: 'Missing or malformed token' });
   }
