@@ -19,14 +19,20 @@ const houseSchema = new mongoose.Schema({
   price: { type: Number, required: true },
   location: { type: String, required: true },
   category:{ type: String ,require : true},
-  images: {
+  imagesUltra: {
     type: [{ type: String }],
-    validate: [arrayLimit, 'Cannot upload more than 3 images']
+    validate: [arrayLimit, 'Cannot upload more than 3 ultra images']
+  },
+
+  imagesPost: {
+    type: [{ type: String }],
+    validate: [arrayLimit, 'Cannot upload more than 3 post images']
   },
   postedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   favCount: { type: Number, default: 0 },
   reviews: [reviewSchema]
 }, { timestamps: true });
 
+houseSchema.index({ title: 'text', description: 'text' });
 const House = mongoose.model('House', houseSchema);
 export default House;

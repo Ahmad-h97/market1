@@ -11,7 +11,10 @@ const storage = new CloudinaryStorage({
 });
 
 
-const uploadMultiple = multer({ storage }).array('images', 3);
+const uploadMultiple = multer({ storage }).fields([
+  { name: 'imagesUltra', maxCount: 3 },
+  { name: 'imagesPost', maxCount: 3 },
+]);
 const uploadProfileImage = multer({ storage }).single('profileImage');
 
 export { uploadMultiple, uploadProfileImage };

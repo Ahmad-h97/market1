@@ -8,156 +8,128 @@ import {
 
 const getAllHouses = async (req, res) => {
   try {
-    
-      // Get page and limit from query params, default to page=1, limit=10
     const page = parseInt(req.query.page) || 1;
     let limit = parseInt(req.query.limit) || 10;
-      const maxLimit = 20;
-      if (limit > maxLimit) limit = maxLimit;
-
-     // Calculate how many documents to skip
+    const maxLimit = 20;
+    if (limit > maxLimit) limit = maxLimit;
     const skip = (page - 1) * limit;
-    console.log(req.query)
 
-    const { location, title, maxPrice, minPrice, timeAmount, timeUnit } = req.query;
+    const {
+      location,
+      search,  // use this instead of title
+      maxPrice,
+      minPrice,
+      timeAmount,
+      timeUnit,
+    } = req.query;
+
     const categoriesQuery = req.query.interestedCategories;
-    console.log(categoriesQuery)
     const match = {};
 
+    // Categories filter
     if (categoriesQuery) {
-  const categories = Array.isArray(categoriesQuery)
-    ? categoriesQuery
-    : categoriesQuery.split(',');
-  match.category = { $in: categories };
-}
-    
-    if (location) {
-        match.location = { $regex: location, $options: 'i' }; // case-insensitive
-      }
-  
-      if (title) {
-        match.title = { $regex: title, $options: 'i' }; // case-insensitive
-      }
-  
-      if (maxPrice || minPrice) {
-        match.price = {};
-        if (minPrice) match.price.$gte = Number(minPrice);
-        if (maxPrice) match.price.$lte = Number(maxPrice);
-      }
-
-
-      if (timeAmount && timeUnit) {
-  const now = new Date();
-  const amount = parseInt(timeAmount, 10);
-  const cutoff = new Date(now);
-
-  switch (timeUnit) {
-    case "minutes":
-      cutoff.setMinutes(now.getMinutes() - amount);
-      break;
-    case "hours":
-      cutoff.setHours(now.getHours() - amount);
-      break;
-    case "days":
-      cutoff.setDate(now.getDate() - amount);
-      break;
-    case "weeks":
-      cutoff.setDate(now.getDate() - amount * 7);
-      break;
-    case "months":
-      cutoff.setMonth(now.getMonth() - amount);
-      break;
-    case "years":
-      cutoff.setFullYear(now.getFullYear() - amount);
-      break;
-    default:
-      break;
-  }
- match.createdAt = { $gte: cutoff };
-}
-
- 
-  
-      let userCity = null;
-      
-   if (req.user?.id) {
-  const user = await User.findById(req.user.id).select('city');
-  userCity = user?.city || null;
-}
-   
-       if (location) {
-      userCity = null;
+      const categories = Array.isArray(categoriesQuery)
+        ? categoriesQuery
+        : categoriesQuery.split(',');
+      match.category = { $in: categories };
     }
-// 5. Build aggregation pipeline
-    const pipeline = [
-      { $match: match },
-    ];
 
-    if (userCity) {
-      // 6. If user didn't filter by location, boost home city houses
+    // Location filter (partial match)
+    if (location) {
+      match.location = { $regex: location, $options: 'i' };
+    }
+
+    // Search filter: full-text on title + description
+    if (search) {
+      match.$text = { $search: search };
+    }
+
+    // Price filter
+    if (maxPrice || minPrice) {
+      match.price = {};
+      if (minPrice) match.price.$gte = Number(minPrice);
+      if (maxPrice) match.price.$lte = Number(maxPrice);
+    }
+
+    // Time filter
+    if (timeAmount && timeUnit) {
+      const now = new Date();
+      const amount = parseInt(timeAmount, 10);
+      const cutoff = new Date(now);
+      switch (timeUnit) {
+        case "minutes": cutoff.setMinutes(now.getMinutes() - amount); break;
+        case "hours": cutoff.setHours(now.getHours() - amount); break;
+        case "days": cutoff.setDate(now.getDate() - amount); break;
+        case "weeks": cutoff.setDate(now.getDate() - amount * 7); break;
+        case "months": cutoff.setMonth(now.getMonth() - amount); break;
+        case "years": cutoff.setFullYear(now.getFullYear() - amount); break;
+      }
+      match.createdAt = { $gte: cutoff };
+    }
+
+    let userCity = null;
+    if (req.user?.id) {
+      const user = await User.findById(req.user.id).select('city');
+      userCity = user?.city || null;
+    }
+    if (location) userCity = null;
+
+    const pipeline = [{ $match: match }];
+
+    // Sort by relevance if searching, else normal sorting with city boost
+    if (search) {
+      pipeline.push(
+        { $addFields: { score: { $meta: "textScore" } } },
+        { $sort: { score: -1, createdAt: -1 } }
+      );
+    } else if (userCity) {
       pipeline.push(
         {
           $addFields: {
-            iscity: {
-              $cond: [{ $eq: ["$location", userCity] }, 1, 0]
-            }
+            iscity: { $cond: [{ $eq: ["$location", userCity] }, 1, 0] }
           }
         },
-        {
-          $sort: { iscity: -1, createdAt: -1 }
-        }
+        { $sort: { iscity: -1, createdAt: -1 } }
       );
     } else {
-      // 7. Just sort by newest
       pipeline.push({ $sort: { createdAt: -1 } });
     }
 
-    // 8. Add pagination
     pipeline.push({ $skip: skip }, { $limit: limit });
 
-    // 9. Run aggregation
     let houses = await House.aggregate(pipeline);
 
-    // 10. Count total (without skip/limit)
     const total = await House.countDocuments(match);
 
-    // 11. Populate postedBy (after aggregation)
     houses = await House.populate(houses, {
       path: 'postedBy',
       select: 'username email profileImage'
     });
 
-        let followingSet = new Set();
+    let followingSet = new Set();
+    if (req.user?.id) {
+      const currentUser = await User.findById(req.user.id).select('following');
+      followingSet = new Set(currentUser.following.map(id => id.toString()));
+    }
 
-if (req.user?.id) {
-  const currentUser = await User.findById(req.user.id).select('following');
-  followingSet = new Set(currentUser.following.map(id => id.toString()));
-}
-
-
-    // 12. Choose what fields to return
     const mapper = res.locals.showFullDetails
       ? getPrivateHouseDetails
       : getPublicHouseDetails;
 
+    const data = houses.map((house) => {
+      const postedById = house.postedBy?._id?.toString();
+      const isFollowing = followingSet.has(postedById);
+      return res.locals.showFullDetails
+        ? getPrivateHouseDetails(house, isFollowing)
+        : getPublicHouseDetails(house);
+    });
 
-  
-const data = houses.map((house) => {
-     const postedById = house.postedBy?._id?.toString();
-  const isFollowing = followingSet.has(postedById);
-
-  return res.locals.showFullDetails
-    ? getPrivateHouseDetails(house, isFollowing)
-    : getPublicHouseDetails(house);
-});
-
-    // 13. Send response
     res.status(200).json({
       data,
       page,
       limit,
       total,
-      totalPages: Math.ceil(total / limit)
+      totalPages: Math.ceil(total / limit),
     });
 
   } catch (err) {
@@ -165,6 +137,7 @@ const data = houses.map((house) => {
     res.status(500).json({ error: 'Server error' });
   }
 };
+
 
 const getMyHouses =async (req, res) => {
   try {
@@ -350,17 +323,24 @@ const getHouseDetails = async (req, res) => {
 const postHouse = async (req, res) => {
   
 
-  const { title,description, location, price, category } = req.body;
-
-  if (req.files.length > 3) {
-    return res.status(400).json({ error: 'Maximum of 3 images allowed.' });
-  }
-
-  const imageUrls = req.files.map(file => file.path);
-
-  //const imageUrl = req.file ? req.file.path : null;
-
   try {
+
+    
+  const imagesUltraFiles = req.files['imagesUltra'] || [];
+    const imagesPostFiles = req.files['imagesPost'] || [];
+    
+  
+
+  if (imagesUltraFiles.length > 3 || imagesPostFiles.length > 3) {
+      return res.status(400).json({ error: 'Maximum of 3 images allowed for each type.' });
+    }
+
+
+   const imagesUltraUrls = imagesUltraFiles.map(file => file.path);
+    const imagesPostUrls = imagesPostFiles.map(file => file.path);
+
+    const { title,description, location, price, category } = req.body;
+  //const imageUrl = req.file ? req.file.path : null;
 
      // 2. Get user ID from token (set in verifyJWT middleware)
     const userId = req.user.id;
@@ -390,7 +370,8 @@ console.log(userId)
       location,
       price,
       category,
-      images: imageUrls,
+      imagesUltra: imagesUltraUrls,
+      imagesPost: imagesPostUrls,
       postedBy: user._id
     });
 

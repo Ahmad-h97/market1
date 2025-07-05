@@ -46,18 +46,17 @@ const generateVerificationCode = async (email,password,username,city,profileImag
 const registerUser = async (req, res) => {
  
   try {
-    console.log("register info ",req.file)
+   
  
-     if (!req.body || Object.keys(req.body).length === 0) {
+      if (!req.body || Object.keys(req.body).length === 0) {
       return res.status(400).json({
         success: false,
-        error: "Registration data is required",
-        details: "Expected: { username, email, password }"
+        message: "Registration data is required",
+        details: "Expected: { username, Email, password, city }",
       });
     }
-
      const { username, Email, password,city } = req.body;
-    console.log(city)
+    
 
      const missingFields = [];
     if (!username) missingFields.push("username");
@@ -82,16 +81,25 @@ const registerUser = async (req, res) => {
       $or: [{ email }, { username }] 
     });
 
-    if (existingUser) {
-      const errors = {};
-      if (existingUser.email === email) errors.email = "Email already registered";
-      if (existingUser.username === username) errors.username = "Username taken";
+  if (existingUser) {
+  if (existingUser.email === email) {
+    return res.status(409).json({
+      success: false,
+      message: "Email is already registered",
+      code: "EMAIL_EXISTS",
+      field: "Email",
+    });
+  }
 
-      return res.status(409).json({
-        success: false,
-        conflicts: errors
-      });
-    }
+  if (existingUser.username === username) {
+    return res.status(409).json({
+      success: false,
+      message: "Username is already taken",
+      code: "USERNAME_EXISTS",
+      field: "username",
+    });
+  }
+}
 
         
       if (password.length < 8) {

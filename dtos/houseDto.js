@@ -5,7 +5,8 @@ export const getPublicHouseDetails = (house) => {
     description: house.description,
     location: house.location,
     category: house.category,
-     images: Array.isArray(house.images) ? house.images : [],
+     imagesUltra: Array.isArray(house.imagesUltra) ? house.imagesUltra : [],
+    imagesPost: Array.isArray(house.imagesPost) ? house.imagesPost : [],
       postedBy: {
       username: house.postedBy?.username,
       id: house.postedBy?._id?.toString(),
