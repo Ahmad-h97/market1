@@ -5,6 +5,9 @@ import Verification from '../models/verification.js';
 import jwt from 'jsonwebtoken';
 import validator from 'validator';//to validate email ,password,url,etc....
 import { sendVerificationEmail } from '../services/emailServices.js';
+import crypto from 'crypto';
+import sendPasswordResetEmail from '../utils/sendPasswordResetEmail.js';
+import checkSuspension from '../utils/checkSuspension.js';
 
 
 const validateEmail = (Email) => {
@@ -46,6 +49,7 @@ const generateVerificationCode = async (email,password,username,city,profileImag
 const registerUser = async (req, res) => {
  
   try {
+    console.log('register request')
    
  
       if (!req.body || Object.keys(req.body).length === 0) {
@@ -118,12 +122,19 @@ const registerUser = async (req, res) => {
         error: "too many tries , try again after 15 minutes",
       });
     }
+  const profileImageUltra = req.files?.profileImageUltra?.[0]?.path || null;
+    const profileImageCompressed = req.files?.profileImageCompressed?.[0]?.path || null;
 
-    const profileImage = req.file?.path || null;
-    console.log("profileImage",profileImage)
-     // Generate and send verification code
-    await generateVerificationCode(email,password,username,city,profileImage);
+    console.log("profileImageUltra:", profileImageUltra);
+    console.log("profileImageCompressed:", profileImageCompressed);
 
+    // Pass both image URLs to your generateVerificationCode function or user creation logic
+    await generateVerificationCode(email, password, username, city, {
+      ultra: profileImageUltra,
+      compressed: profileImageCompressed,
+    });
+
+    
     res.status(201).json({
       success: true,
       message: 'Verification code sent to email',
@@ -149,6 +160,7 @@ const loginUser = async (req, res) => {
 
   try {
     console.log(req.body);
+    console.log('login rewquest');
      if (!req.body || Object.keys(req.body).length === 0) {
       return res.status(400).json({
         success: false,
@@ -185,7 +197,15 @@ const loginUser = async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-
+ const suspensionStatus = await checkSuspension(user);
+    if (suspensionStatus.blocked) {
+      return res.status(403).json({
+        success: false,
+        error: 'Account is suspended',
+        reason: suspensionStatus.reason,
+        suspendedUntil: suspensionStatus.suspendedUntil,
+      });
+    }
    
      // 2. Check password using bcrypt
      console.log('Password entered:', password);
@@ -198,13 +218,13 @@ console.log('Stored hash:', user.password);
     }
     // return it to 401 later s
     const accessToken = jwt.sign(
-  { id: user._id },
+  { id: user._id, role: user.role },
   env.ACCESS_TOKEN_SECRET,
   { expiresIn: '15m' }
 );
 
 const refreshToken = jwt.sign(
-  { id: user._id },
+  { id: user._id, role: user.role },
   env.REFRESH_TOKEN_SECRET,
   { expiresIn: '7d' }
 );
@@ -229,7 +249,8 @@ await user.save();
         user: {
           id: user._id,
           username: user.username,
-          profileImage: user.profileImage
+          profileImage: user.profileImage,
+           role: user.role
             }
       });
 } catch (err) {
@@ -268,7 +289,36 @@ const refreshToken = async (req, res) => {
   }
 };
 
-const LogoutUser = (req, res) => {
+
+const LogoutUser = async (req, res) => {
+  
+  console.log('logout');
+  const refreshToken = req.cookies?.jwt;
+  if (!refreshToken) return res.sendStatus(204); // No content, no refresh token sent
+
+  
+  console.log('Refresh token before logout:', refreshToken);
+
+  // Find user with this refresh token
+  const user = await User.findOne({ refreshToken });
+  if (!user) {
+    console.log('dddccc')
+    // Token not found in DB, clear cookie anyway
+    res.clearCookie('refreshToken', {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None',
+    });
+    return res.sendStatus(204);
+  }
+
+  // Remove refresh token from user in DB
+  console.log('User refresh token before clearing:', user.refreshToken);
+  user.refreshToken = '';
+  await user.save();
+  console.log('User refresh token after clearing:', user.refreshToken);
+
+  // Clear refresh token cookie
   res.clearCookie('refreshToken', {
     httpOnly: true,
     secure: true,
@@ -279,4 +329,93 @@ const LogoutUser = (req, res) => {
 };
 
 
-export { registerUser, loginUser,refreshToken,LogoutUser };
+const changePassword = async (req, res) => {
+  const { oldPassword, newPassword } = req.body;
+
+  if (!oldPassword || !newPassword || newPassword.length < 8) {
+    return res.status(400).json({ message: 'Invalid input' });
+  }
+
+  const user = await User.findById(req.user.id).select('+password');
+  if (!user) {
+    return res.status(404).json({ message: 'User not found' });
+  }
+
+  const match = await bcrypt.compare(oldPassword, user.password);
+  if (!match) {
+    return res.status(401).json({ message: 'Old password is incorrect' });
+  }
+
+  // Manually hash the new password
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+  // Assign hashed password and tell schema to skip auto-hashing
+  user.password = hashedPassword;
+  user.skipHashing = true;
+
+  await user.save();
+
+  res.json({ message: 'Password changed successfully' });
+};
+
+const forgotPassword = async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ message: 'Email is required' });
+
+  const user = await User.findOne({ email });
+  if (!user) {
+    return res.json({ message: 'If that email is registered, a reset link was sent' });
+  }
+
+  const token = crypto.randomBytes(32).toString('hex');
+  const expires = Date.now() + 60 * 60 * 1000; // 1 hour
+
+  user.resetToken = token;
+  user.resetTokenExpires = new Date(expires);
+  await user.save();
+  const FRONTEND_URL = process.env.REACT_APP_FRONTEND_URL;
+  const resetUrl = `${FRONTEND_URL}/reset-password/${token}`;
+  await sendPasswordResetEmail(user.email, resetUrl);
+
+  res.json({ message: 'If that email is registered, a reset link was sent' });
+};
+
+const resetPassword = async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { newPassword, confirmPassword } = req.body;
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ message: 'New password must be at least 6 characters' });
+    }
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ message: 'Passwords do not match' });
+    }
+
+    // Find user by reset token and check expiry
+    const user = await User.findOne({
+      resetToken: token,
+      resetTokenExpires: { $gt: Date.now() }, // token not expired
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: 'Invalid or expired reset token' });
+    }
+
+    // Update password and clear reset token fields
+    user.password = newPassword;
+    user.resetToken = undefined;
+    user.resetTokenExpires = undefined;
+
+    // Use skipHashing flag if your pre-save hook hashes password
+    user.skipHashing = false;
+    await user.save();
+
+    res.json({ message: 'Password has been reset successfully' });
+  } catch (err) {
+    console.error('[ResetPassword] Error:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export {resetPassword , forgotPassword ,registerUser, loginUser,refreshToken,LogoutUser,changePassword };

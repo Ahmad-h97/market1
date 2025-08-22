@@ -4,19 +4,24 @@ import {
   getPublicHouseDetails, 
   getPrivateHouseDetails 
 } from '../dtos/houseDto.js';
+import { logActionToReport } from '../utils/reportActions.js'; // adjust path as needed
+import Report from '../models/Report.js';
+import { addEditRecord } from '../utils/editHistoryUtils.js';
+import mongoose from 'mongoose';
 
 
 const getAllHouses = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    let limit = parseInt(req.query.limit) || 10;
-    const maxLimit = 20;
-    if (limit > maxLimit) limit = maxLimit;
-    const skip = (page - 1) * limit;
+     console.log('🔍 Query cursor:', req.query.cursor);  // Log all query params
+
+  
+    const limit = Math.min(parseInt(req.query.limit) || 10, 20);
+    const cursor = req.query.cursor;
+    const page = parseInt(req.query.page, 10);
 
     const {
       location,
-      search,  // use this instead of title
+      search,
       maxPrice,
       minPrice,
       timeAmount,
@@ -24,9 +29,8 @@ const getAllHouses = async (req, res) => {
     } = req.query;
 
     const categoriesQuery = req.query.interestedCategories;
-    const match = {};
+    const match = { flaggedForDeletion: { $ne: true } };
 
-    // Categories filter
     if (categoriesQuery) {
       const categories = Array.isArray(categoriesQuery)
         ? categoriesQuery
@@ -34,24 +38,21 @@ const getAllHouses = async (req, res) => {
       match.category = { $in: categories };
     }
 
-    // Location filter (partial match)
+    
     if (location) {
       match.location = { $regex: location, $options: 'i' };
     }
 
-    // Search filter: full-text on title + description
     if (search) {
       match.$text = { $search: search };
     }
 
-    // Price filter
     if (maxPrice || minPrice) {
       match.price = {};
       if (minPrice) match.price.$gte = Number(minPrice);
       if (maxPrice) match.price.$lte = Number(maxPrice);
     }
 
-    // Time filter
     if (timeAmount && timeUnit) {
       const now = new Date();
       const amount = parseInt(timeAmount, 10);
@@ -67,6 +68,39 @@ const getAllHouses = async (req, res) => {
       match.createdAt = { $gte: cutoff };
     }
 
+    // Hybrid: convert page to cursor
+    if (!cursor && page && page > 1) {
+      const offset = (page - 1) * limit;
+      const sortedMatch = await House.find(match)
+        .sort({ createdAt: -1 })
+        .skip(offset)
+        .limit(1)
+        .select('_id');
+      if (sortedMatch.length > 0) {
+        match._id = { $lt: sortedMatch[0]._id };
+      }
+    }
+
+   if (cursor) {
+  const [cursorCreatedAtStr, cursorIdStr] = cursor.split('|');
+  const cursorCreatedAt = new Date(cursorCreatedAtStr);
+
+  // Check if date is valid
+  if (isNaN(cursorCreatedAt.getTime())) {
+    // invalid date, handle error or ignore cursor
+    console.warn('⚠️ Invalid cursor date:', cursorCreatedAtStr);
+  } else {
+    const cursorId = new mongoose.Types.ObjectId(cursorIdStr);
+    match.$or = [
+      { createdAt: { $lt: cursorCreatedAt } },
+      { createdAt: cursorCreatedAt, _id: { $lt: cursorId } }
+    ];
+  }
+}
+
+    const userRole = req.user?.role || 'user';
+    const isModeratorOrAdmin = ['admin', 'moderator'].includes(userRole);
+
     let userCity = null;
     if (req.user?.id) {
       const user = await User.findById(req.user.id).select('city');
@@ -74,9 +108,11 @@ const getAllHouses = async (req, res) => {
     }
     if (location) userCity = null;
 
+   
+
+
     const pipeline = [{ $match: match }];
 
-    // Sort by relevance if searching, else normal sorting with city boost
     if (search) {
       pipeline.push(
         { $addFields: { score: { $meta: "textScore" } } },
@@ -95,16 +131,137 @@ const getAllHouses = async (req, res) => {
       pipeline.push({ $sort: { createdAt: -1 } });
     }
 
-    pipeline.push({ $skip: skip }, { $limit: limit });
+    pipeline.push(
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'postedBy',
+          foreignField: '_id',
+          as: 'postedBy'
+        }
+      },
+      { $unwind: '$postedBy' }
+    );
+
+    if (!isModeratorOrAdmin) {
+      pipeline.push({
+        $match: {
+          'postedBy.hidden': false,
+          'postedBy.banned': { $ne: true },
+          hidden: { $ne: true }
+        }
+      });
+    }
+
+    pipeline.push({ $limit: limit });
 
     let houses = await House.aggregate(pipeline);
-
-    const total = await House.countDocuments(match);
-
     houses = await House.populate(houses, {
       path: 'postedBy',
-      select: 'username email profileImage'
+      select: 'username email profileImage hidden banned'
     });
+
+
+    
+
+
+    
+// Parse absoluteLatest from query param JSON string if present
+let absoluteLatest = null;
+if (req.query.absoluteLatest) {
+  try {
+    absoluteLatest = JSON.parse(req.query.absoluteLatest);
+    // convert types if needed:
+    absoluteLatest.createdAt = new Date(absoluteLatest.createdAt);
+    absoluteLatest._id = new mongoose.Types.ObjectId(absoluteLatest._id);
+  } catch (err) {
+    console.warn('⚠️ Failed to parse absoluteLatest from req.query:', err);
+    absoluteLatest = null;
+  }
+}
+
+
+    if (!absoluteLatest) {
+  if (page === 1 && houses.length > 0) {
+    absoluteLatest = houses[0]; // Set from page 1 results
+   console.log('absoluteLatest if page 1 ', {
+  postedById: absoluteLatest.postedBy?._id?.toString() || null,
+  createdAt: absoluteLatest.createdAt,
+  location: absoluteLatest.location
+});
+  } else {
+    // Fetch directly from DB
+    absoluteLatest = await House.findOne({ flaggedForDeletion: { $ne: true } })
+      .sort({ createdAt: -1, _id: -1 })
+      .select('_id createdAt title location');
+      console.log('absoluteLatest if page 2 or bigger  ', {
+  postedById: absoluteLatest.postedBy?._id?.toString() || null,
+  createdAt: absoluteLatest.createdAt,
+  location: absoluteLatest.location
+});
+
+  }
+  
+}
+
+
+
+  let newPosts = [];
+    let firstNew = null;
+    let lastNew = null;
+    let evenNewerPosts = [];
+
+const newerThanAbsoluteQuery = {
+  $or: [
+    { createdAt: { $gt: absoluteLatest.createdAt } },
+    {
+      createdAt: absoluteLatest.createdAt,
+      _id: { $gt: absoluteLatest._id }
+    }
+  ],
+  flaggedForDeletion: { $ne: true }
+};
+
+if (userCity && !location) {
+  newerThanAbsoluteQuery.location = userCity;
+}
+
+evenNewerPosts = await House.find(newerThanAbsoluteQuery)
+  .sort({ createdAt: 1 }) // ascending: oldest new post first
+  .limit(3);
+
+evenNewerPosts = await House.populate(evenNewerPosts, {
+  path: 'postedBy',
+  select: 'username email profileImage hidden banned'
+});
+
+
+
+if (evenNewerPosts.length > 0) {
+  newPosts = evenNewerPosts;
+  firstNew = newPosts[0]._id.toString();
+  lastNew = newPosts[newPosts.length - 1]._id.toString();
+
+  // Set newest in new list as the new absoluteLatest
+  absoluteLatest = newPosts[newPosts.length - 1]; // The last is the newest
+}
+  
+    
+console.log("🚨 Even newer than absoluteLatest:", evenNewerPosts.map(p => ({
+  id: p._id.toString(),
+  createdAt: p.createdAt,
+  location: p.location
+})));
+
+
+if (evenNewerPosts.length > 0) {
+  absoluteLatest = evenNewerPosts[evenNewerPosts.length - 1]; // newest
+} else if (newPosts.length > 0) {
+  absoluteLatest = newPosts[newPosts.length - 1]; // newest
+}
+
+ 
+ 
 
     let followingSet = new Set();
     if (req.user?.id) {
@@ -116,27 +273,48 @@ const getAllHouses = async (req, res) => {
       ? getPrivateHouseDetails
       : getPublicHouseDetails;
 
-    const data = houses.map((house) => {
+    const data = houses.map(house => {
       const postedById = house.postedBy?._id?.toString();
       const isFollowing = followingSet.has(postedById);
-      return res.locals.showFullDetails
-        ? getPrivateHouseDetails(house, isFollowing)
-        : getPublicHouseDetails(house);
+      return mapper(house, isFollowing);
     });
+
+    const newPostsMapped = newPosts.map(house => {
+      const postedById = house.postedBy?._id?.toString();
+      const isFollowing = followingSet.has(postedById);
+      return mapper(house, isFollowing);
+    });
+
+    const lastHouse = houses[houses.length - 1];
+    const nextCursor = lastHouse
+      ? `${lastHouse.createdAt.toISOString()}|${lastHouse._id.toString()}`
+      : null;
 
     res.status(200).json({
       data,
-      page,
       limit,
-      total,
-      totalPages: Math.ceil(total / limit),
+      nextCursor,
+      newPosts: newPostsMapped,
+      firstNew,
+      lastNew,
+        absoluteLatest: {
+    _id: absoluteLatest._id.toString(),
+    createdAt: absoluteLatest.createdAt.toISOString(),
+    title: absoluteLatest.title,
+    location: absoluteLatest.location,
+  },
     });
 
   } catch (err) {
-    console.error('Get Houses Error:', err);
+    console.error('❌ Get Houses Error:', err);
     res.status(500).json({ error: 'Server error' });
   }
+  console.log('🏁🏁🏁🏁🏁🏁🏁🏁🏁🏁🏁')
 };
+
+
+
+
 
 
 const getMyHouses =async (req, res) => {
@@ -157,7 +335,7 @@ const getMyHouses =async (req, res) => {
     const { location, title, maxPrice, minPrice, date } = req.query;
 
     const filter = {postedBy: userId};
-
+filter.flaggedForDeletion = { $ne: true };
     
     if (location) {
         filter.location = { $regex: location, $options: 'i' }; // case-insensitive
@@ -182,7 +360,7 @@ const getMyHouses =async (req, res) => {
 
     const [houses, total] = await Promise.all([
        House.find(filter)
-       .populate('postedBy', 'username email')
+       .populate('postedBy', 'username email profileImage')
        .sort({createdAt:-1})
        .skip(skip)
        .limit(limit),
@@ -217,6 +395,7 @@ const getUserHouses = async (req, res) => {
 
     const { location, title, maxPrice, minPrice, date } = req.query;
     const filter = { postedBy: userId };
+    filter.flaggedForDeletion = { $ne: true };
 
     if (location) {
       filter.location = { $regex: location, $options: 'i' };
@@ -237,29 +416,63 @@ const getUserHouses = async (req, res) => {
       filter.createdAt = { $gte: parsedDate };
     }
 
-    // Fetch houses and total count
-    let [houses, total] = await Promise.all([
-      House.find(filter)
-        .populate('postedBy', 'username email profileImage') // ✅ include profileImage
+    // Determine if user is moderator or admin
+    const userRole = req.user?.role || 'user';
+    const isModeratorOrAdmin = ['admin', 'moderator'].includes(userRole);
+
+    // Fetch houses and total count in parallel
+    // If NOT moderator/admin, we must filter hidden houses and hidden users
+
+    let houses, total;
+
+    if (isModeratorOrAdmin) {
+      // No filtering on hidden state for mod/admin
+      [houses, total] = await Promise.all([
+        House.find(filter)
+          .populate('postedBy', 'username email profileImage hidden banned')
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit),
+        House.countDocuments(filter),
+      ]);
+    } else {
+      // Normal users: filter hidden houses and hidden users
+      const filteredFilter = { ...filter, hidden: { $ne: true } };
+
+      // Find houses with postedBy populated, then filter out houses with hidden owners
+      houses = await House.find(filteredFilter)
+        .populate('postedBy', 'username email profileImage hidden ')
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(limit),
-      House.countDocuments(filter),
-    ]);
+        .limit(limit);
 
-    // ✅ Prepare followingSet (if user is logged in)
+      // Filter out houses whose owners are hidden or banned
+      houses = houses.filter(
+  house => house.postedBy && !house.postedBy.hidden && !house.postedBy.banned
+);
+
+      // For total, count houses with hidden: false
+      // Then filter out those whose owners are hidden by counting manually
+
+      // Simple approximation: count documents with hidden false only (no postedBy check)
+      // For precise total you can do aggregation but this is simpler:
+      total = await House.countDocuments(filteredFilter);
+
+      // Optional: adjust total by filtering houses with hidden owners, but that's more complex
+      // Usually totalPages are approximate anyway
+    }
+
+    // Following set
     let followingSet = new Set();
     if (req.user?.id) {
       const currentUser = await User.findById(req.user.id).select('following');
       followingSet = new Set(currentUser.following.map(id => id.toString()));
     }
 
-    // ✅ Decide which mapper to use
     const mapper = res.locals.showFullDetails
       ? getPrivateHouseDetails
       : getPublicHouseDetails;
 
-    // ✅ Add isFollowing flag per house
     const data = houses.map(house => {
       const postedById = house.postedBy?._id?.toString();
       const isFollowing = followingSet.has(postedById);
@@ -269,13 +482,15 @@ const getUserHouses = async (req, res) => {
         : getPublicHouseDetails(house);
     });
 
-    // ✅ Return response
+    const user = await User.findById(userId).select('username email profileImage');
+
     res.status(200).json({
       data,
       page,
       limit,
       total,
-      totalpages: Math.ceil(total / limit),
+      totalPages: Math.ceil(total / limit),
+      user,
     });
 
   } catch (err) {
@@ -283,7 +498,6 @@ const getUserHouses = async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 };
-
 
 const getHouseDetails = async (req, res) => {
   try {
@@ -377,10 +591,12 @@ console.log(userId)
 
     await newHouse.save();
 
+    
     // 3. Optional: Add to user's postedHouses array
     user.postedHouses.push(newHouse._id);
     await user.save();
 
+  
     res.status(201).json({ message: 'House posted', house: newHouse });
   } catch (err) {
     console.error('Post House Error:', err);
@@ -388,79 +604,142 @@ console.log(userId)
   }
 };
 
+
 const editHouse = async (req, res) => {
-  console.log("req start ....." ,req.body,req.files,"req end ")
-  const { houseId } = req.params;
-  const { title, description, location,category, price = [] } = req.body;
-  const existingUrls = JSON.parse(req.body.existingUrls);
-  const imagesToRemove =0;
-  console.log(existingUrls)
   try {
+    const { houseId } = req.params;
     const userId = req.user.id;
 
+    // Parse form fields
+    const { title, description, location, category, price = [] } = req.body;
+    const existingUrls = JSON.parse(req.body.existingUrls || '[]');
+
+    // Get new uploaded files
+    const imagesUltraFiles = req.files?.imagesUltra || [];
+    const imagesPostFiles = req.files?.imagesPost || [];
+
     const house = await House.findById(houseId);
-    if (!house) 
+    if (!house) {
       return res.status(404).json({ error: `House with ID ${houseId} not found` });
-console.log( house.images)
-    if (house.postedBy.toString() !== userId.toString()) 
-      return res.status(403).json ("User does not own this house");
-   
-    
-    // 2. Calculate image changes
-    const currentImages = existingUrls.length;
-    
-    const newImagesToAdd = req.files?.length || 0;
-    const finalImageCount = currentImages - imagesToRemove + newImagesToAdd;
-console.log('123')
-    // 3. Validate image count
-    if (finalImageCount > 3) {
+    }
+
+    if (req.user.role !== 'admin' && house.postedBy.toString() !== userId.toString()) {
+      return res.status(403).json({ error: "User does not own this house" });
+    }
+
+    // Validate max image limit
+    const currentCount = existingUrls.length;
+    const newCount = imagesUltraFiles.length;
+    const finalCount = currentCount + newCount;
+
+    if (finalCount > 3) {
       return res.status(400).json({
-        error: `Maximum 3 images allowed. Current: ${currentImages}, Trying to add: ${newImagesToAdd}, Remove: ${imagesToRemove}`,
-        maxAllowed: 3,
-        currentCount: currentImages,
-        wouldBeCount: finalImageCount
+        error: `Max 3 images allowed. Current: ${currentCount}, New: ${newCount}`,
       });
     }
-console.log('123')
-    
-    // 4. Process image removal (database only)
-    console.log(existingUrls)
-      house.images = house.images.filter(imgUrl => existingUrls.includes(imgUrl));
-   
 
-    
-    // 5. Add new images (if any)
-    if (req.files?.length) {
-      const newImageUrls = req.files.map(file => file.path);
-      house.images.push(...newImageUrls);
+    // Keep track of edits
+    const edits = [];
+
+    // Check imagesUltra changes
+    const filteredUltra = house.imagesUltra.filter((url) => existingUrls.includes(url));
+    if (JSON.stringify(filteredUltra) !== JSON.stringify(house.imagesUltra)) {
+      edits.push({
+        field: 'imagesUltra',
+        oldValue: [...house.imagesUltra],
+        newValue: filteredUltra,
+      });
     }
-  
+    house.imagesUltra = filteredUltra;
 
-    
-    // 6. Enforce maximum limit (final safeguard)
-    house.images = house.images.slice(0, 3);
+    // Check imagesPost changes
+    const filteredPost = house.imagesPost.filter((url) => existingUrls.includes(url));
+    if (JSON.stringify(filteredPost) !== JSON.stringify(house.imagesPost)) {
+      edits.push({
+        field: 'imagesPost',
+        oldValue: [...house.imagesPost],
+        newValue: filteredPost,
+      });
+    }
+    house.imagesPost = filteredPost;
 
+    // Append new image paths
+    if (imagesUltraFiles.length && imagesPostFiles.length) {
+      const newUltraUrls = imagesUltraFiles.map((file) => file.path);
+      const newPostUrls = imagesPostFiles.map((file) => file.path);
 
-    // Update fields
-    if (title) house.title = title;
-    if (description) house.description = description;
-    if (location) house.location = location;
-    if (category) house.category = category;
-    if (price) house.price = price;
+      edits.push({
+        field: 'imagesUltra',
+        oldValue: [...house.imagesUltra],
+        newValue: [...house.imagesUltra, ...newUltraUrls],
+      });
+      edits.push({
+        field: 'imagesPost',
+        oldValue: [...house.imagesPost],
+        newValue: [...house.imagesPost, ...newPostUrls],
+      });
+
+      house.imagesUltra.push(...newUltraUrls);
+      house.imagesPost.push(...newPostUrls);
+    }
+
+    // Slice to max 3 images just in case
+    house.imagesUltra = house.imagesUltra.slice(0, 3);
+    house.imagesPost = house.imagesPost.slice(0, 3);
+
+    // Helper to check and track changes for other fields
+    function checkAndTrack(fieldName, newValue) {
+      if (
+        newValue !== undefined &&
+        newValue !== null &&
+        JSON.stringify(newValue) !== JSON.stringify(house[fieldName])
+      ) {
+        edits.push({
+          field: fieldName,
+          oldValue: house[fieldName],
+          newValue,
+        });
+        house[fieldName] = newValue;
+      }
+    }
+
+    checkAndTrack('title', title);
+    checkAndTrack('description', description);
+    checkAndTrack('location', location);
+    checkAndTrack('category', category);
+    checkAndTrack('price', price);
 
     await house.save();
-    res.status(200).json({ message: 'House updated', house });
+
+    // Save all edits asynchronously, ignore if fails silently or you can log errors
+    await Promise.all(
+      edits.map((edit) =>
+        addEditRecord({
+          userId,
+          targetId: houseId,
+          targetType: 'house',
+          field: edit.field,
+          oldValue: edit.oldValue,
+          newValue: edit.newValue,
+        })
+      )
+    );
+
+    res.status(200).json({ message: "House updated", house });
 
   } catch (err) {
-    console.error('Edit House Error:', err);
-    res.status(500).json({ 
-      error: 'Failed to update house',
-    details: err.message });
+    console.error("Edit House Error:", err);
+    res.status(500).json({
+      error: "Failed to update house",
+      details: err.message,
+    });
   }
 };
 
+
 const deleteHouse = async (req, res) => {
   const { houseId } = req.params;
+  console.log(houseId)
 
   try {
 
@@ -470,20 +749,26 @@ const deleteHouse = async (req, res) => {
     if (!house) 
       return res.status(404).json({ error: `House with ID ${houseId} not found` });
 
-    if (house.postedBy.toString() !== userId.toString()) 
-      return res.status(403).json ("User does not own this house");
-   
+   if (req.user.role !== 'admin' && house.postedBy.toString() !== userId.toString()) {
+  return res.status(403).json({ error: "User does not own this house" });
+}
     // Optional: Delete images from Cloudinary if stored there
     // for (let imageUrl of house.images) {
     //   const publicId = extractPublicId(imageUrl); // You need to implement this
     //   await cloudinary.uploader.destroy(publicId);
     // }
 
-  await house.deleteOne();
-    res.status(200).json({ message: 'House deleted successfully' });
+  house.flaggedForDeletion = true;
+    house.deleteAt = new Date(Date.now() + 10 * 60 * 1000); // 10 mins from now
+    await house.save();
+
+    res.status(200).json({
+      message: 'House marked for deletion. It will be removed in 10 minutes.',
+      deleteAt: house.deleteAt,
+    });
   } catch (err) {
     console.error('Delete House Error:', err);
-    res.status(500).json({ error: 'Failed to delete house', details: err.message });
+    res.status(500).json({ error: 'Failed to mark house for deletion', details: err.message });
   }
 };
 
@@ -568,7 +853,80 @@ const deleteReview = async (req, res) => {
   }
 };
 
-export { getAllHouses,getMyHouses,getUserHouses, getHouseDetails,postHouse, editHouse ,deleteHouse , deleteReview, upsertReview };
+const toggleOutOfStock = async (req, res) => {
+    try {
+    const houseId = req.params.houseId;
+      console.log('toggleOutOfStock -> houseId:', houseId);
+    const house = await House.findById(houseId);
+    if (!house) return res.status(404).json({ message: 'House not found' });
+
+    // Only owner can toggle
+    if (house.postedBy.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    house.outOfStock = !house.outOfStock;
+    await house.save();
+
+    res.status(200).json({ outOfStock: house.outOfStock });
+  } catch (err) {
+    console.error('Toggle error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+export const hideHouse = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { hide, reportId } = req.body;
+
+    // 🔍 Validate report existence if reportId provided
+    if (reportId) {
+      const reportExists = await Report.exists({ _id: reportId });
+      if (!reportExists) {
+        return res.status(404).json({ message: 'Report not found' });
+      }
+    }
+
+    // 🔄 Update hidden field of the house
+    const house = await House.findByIdAndUpdate(
+      id,
+      { hidden: hide },
+      { new: true, select: 'title hidden' }
+    );
+
+    if (!house) {
+      return res.status(404).json({ message: 'House not found' });
+    }
+
+    // 📝 Log the action only when hiding (not unhide)
+    if (reportId && hide) {
+      try {
+        await logActionToReport(
+          reportId,
+          'hide_house',
+          req.user.id,
+          `House titled "${house.title}" was hidden.`
+        );
+      } catch (logErr) {
+        console.warn('Could not log action to report:', logErr.message);
+      }
+    }
+
+    // ✅ Return updated house info
+    res.json({
+      message: `House is now ${hide ? 'hidden' : 'visible'}`,
+      hidden: house.hidden,
+    });
+
+  } catch (err) {
+    console.error('Error hiding house:', err);
+    res.status(500).json({ message: 'Failed to update house visibility' });
+  }
+};
+
+
+export { getAllHouses,getMyHouses,getUserHouses, getHouseDetails,postHouse, editHouse ,deleteHouse , deleteReview, upsertReview,toggleOutOfStock };
 
 
 /*
@@ -597,4 +955,177 @@ const addReview = async (req, res) => {
     res.status(500).json({ error: 'Failed to add review' });
   }
 };
+*/
+
+
+
+
+/* my old get all houses 
+
+const getAllHouses = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    let limit = parseInt(req.query.limit) || 10;
+    const maxLimit = 20;
+    if (limit > maxLimit) limit = maxLimit;
+    const skip = (page - 1) * limit;
+
+    const {
+      location,
+      search,  // use this instead of title
+      maxPrice,
+      minPrice,
+      timeAmount,
+      timeUnit,
+    } = req.query;
+
+    const categoriesQuery = req.query.interestedCategories;
+    const match = {};
+    match.flaggedForDeletion = { $ne: true };
+
+    // Categories filter
+    if (categoriesQuery) {
+      const categories = Array.isArray(categoriesQuery)
+        ? categoriesQuery
+        : categoriesQuery.split(',');
+      match.category = { $in: categories };
+    }
+
+    // Location filter (partial match)
+    if (location) {
+      match.location = { $regex: location, $options: 'i' };
+    }
+
+    // Search filter: full-text on title + description
+    if (search) {
+      match.$text = { $search: search };
+    }
+
+    // Price filter
+    if (maxPrice || minPrice) {
+      match.price = {};
+      if (minPrice) match.price.$gte = Number(minPrice);
+      if (maxPrice) match.price.$lte = Number(maxPrice);
+    }
+
+    // Time filter
+    if (timeAmount && timeUnit) {
+      const now = new Date();
+      const amount = parseInt(timeAmount, 10);
+      const cutoff = new Date(now);
+      switch (timeUnit) {
+        case "minutes": cutoff.setMinutes(now.getMinutes() - amount); break;
+        case "hours": cutoff.setHours(now.getHours() - amount); break;
+        case "days": cutoff.setDate(now.getDate() - amount); break;
+        case "weeks": cutoff.setDate(now.getDate() - amount * 7); break;
+        case "months": cutoff.setMonth(now.getMonth() - amount); break;
+        case "years": cutoff.setFullYear(now.getFullYear() - amount); break;
+      }
+      match.createdAt = { $gte: cutoff };
+    }
+
+    const userRole = req.user?.role || 'user';
+    console.log('User role:', userRole); 
+    const isModeratorOrAdmin = ['admin', 'moderator'].includes(userRole);
+
+    let userCity = null;
+    if (req.user?.id) {
+      const user = await User.findById(req.user.id).select('city');
+      userCity = user?.city || null;
+    }
+    if (location) userCity = null;
+
+    const pipeline = [{ $match: match }];
+
+    // Sort by relevance if searching, else normal sorting with city boost
+    if (search) {
+      pipeline.push(
+        { $addFields: { score: { $meta: "textScore" } } },
+        { $sort: { score: -1, createdAt: -1 } }
+      );
+    } else if (userCity) {
+      pipeline.push(
+        {
+          $addFields: {
+            iscity: { $cond: [{ $eq: ["$location", userCity] }, 1, 0] }
+          }
+        },
+        { $sort: { iscity: -1, createdAt: -1 } }
+      );
+    } else {
+      pipeline.push({ $sort: { createdAt: -1 } });
+    }
+
+    pipeline.push(
+  {
+    $lookup: {
+      from: 'users',
+      localField: 'postedBy',
+      foreignField: '_id',
+      as: 'postedBy'
+    }
+  },
+  { $unwind: '$postedBy' }
+);
+
+if (!isModeratorOrAdmin) {
+  // Only filter hidden/banned for normal users
+  pipeline.push({
+    $match: {
+      'postedBy.hidden': false,
+      'postedBy.banned': { $ne: true },
+      hidden: { $ne: true }
+    }
+  });
+}
+    // Copy pipeline for total count (exclude skip/limit)
+    const countPipeline = [...pipeline];
+    // Add count stage
+    countPipeline.push({ $count: 'totalCount' });
+
+    const countResult = await House.aggregate(countPipeline);
+    const total = countResult.length > 0 ? countResult[0].totalCount : 0;
+
+    // Add pagination to original pipeline after counting
+    pipeline.push({ $skip: skip }, { $limit: limit });
+
+    let houses = await House.aggregate(pipeline);
+
+    houses = await House.populate(houses, {
+      path: 'postedBy',
+      select: 'username email profileImage hidden banned'
+    });
+
+    let followingSet = new Set();
+    if (req.user?.id) {
+      const currentUser = await User.findById(req.user.id).select('following');
+      followingSet = new Set(currentUser.following.map(id => id.toString()));
+    }
+
+    const mapper = res.locals.showFullDetails
+      ? getPrivateHouseDetails
+      : getPublicHouseDetails;
+
+    const data = houses.map((house) => {
+      const postedById = house.postedBy?._id?.toString();
+      const isFollowing = followingSet.has(postedById);
+      return res.locals.showFullDetails
+        ? getPrivateHouseDetails(house, isFollowing)
+        : getPublicHouseDetails(house);
+    });
+
+    res.status(200).json({
+      data,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    });
+
+  } catch (err) {
+    console.error('Get Houses Error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+};
+
 */

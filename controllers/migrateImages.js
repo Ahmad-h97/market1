@@ -1,50 +1,27 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import House from '../models/House.js';
+import User from '../models/User.js'; // Make sure the path is correct
 
 dotenv.config();
 
-async function migrateImages() {
+async function removeSuspendedField() {
   try {
     await mongoose.connect(process.env.MONGODB_URI);
     console.log('✅ Connected to MongoDB');
 
-    // Find all houses missing either field
-    const houses = await House.find({
-      $or: [
-        { imagesUltra: { $exists: false } },
-        { imagesPost: { $exists: false } }
-      ]
-    });
+    // Remove the `suspended` field from all users
+    const result = await User.updateMany(
+      { suspended: { $exists: true } },
+      { $unset: { suspended: "" } }
+    );
 
-    console.log(`🏠 Found ${houses.length} houses to update`);
-
-    for (const house of houses) {
-      let updated = false;
-
-      if (!house.imagesUltra) {
-        house.imagesUltra = [];
-        updated = true;
-      }
-
-      if (!house.imagesPost) {
-        house.imagesPost = [];
-        updated = true;
-      }
-
-      if (updated) {
-        await house.save();
-        console.log(`✔️ Updated house ID: ${house._id}`);
-      }
-    }
-
-    console.log('✅ Migration complete');
+    console.log(`🧹 Removed 'suspended' field from ${result.modifiedCount} users`);
   } catch (err) {
-    console.error('❌ Migration error:', err);
+    console.error('❌ Error during migration:', err);
   } finally {
     await mongoose.disconnect();
     console.log('🔌 Disconnected from DB');
   }
 }
 
-migrateImages();
+removeSuspendedField();

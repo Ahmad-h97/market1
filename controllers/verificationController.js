@@ -54,7 +54,7 @@ const verifyEmail = async (req, res) => {
     await user.save();
 
        const refreshToken = jwt.sign(
-      { id: user._id },
+      { id: user._id, role: user.role },
       process.env.REFRESH_TOKEN_SECRET,
       { expiresIn: '7d' }
     );
@@ -67,7 +67,7 @@ await user.save();
 
     // Create tokens
     const accessToken = jwt.sign(
-      { id: user._id },
+      { id: user._id, role: user.role },
       process.env.ACCESS_TOKEN_SECRET,
       { expiresIn: '15m' }
     );
@@ -90,7 +90,8 @@ await user.save();
         id: user._id,
         username: user.username,
         email: user.email,
-        profileImage: user.profileImage
+        profileImage: user.profileImage,
+         role: user.role
       }
     });
 

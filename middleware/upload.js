@@ -15,6 +15,9 @@ const uploadMultiple = multer({ storage }).fields([
   { name: 'imagesUltra', maxCount: 3 },
   { name: 'imagesPost', maxCount: 3 },
 ]);
-const uploadProfileImage = multer({ storage }).single('profileImage');
+const uploadProfileImages = multer({ storage }).fields([
+  { name: 'profileImageUltra', maxCount: 1 },
+  { name: 'profileImageCompressed', maxCount: 1 },
+]);
 
-export { uploadMultiple, uploadProfileImage };
+export { uploadMultiple, uploadProfileImages };

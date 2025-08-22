@@ -19,6 +19,10 @@ const houseSchema = new mongoose.Schema({
   price: { type: Number, required: true },
   location: { type: String, required: true },
   category:{ type: String ,require : true},
+    outOfStock: {
+    type: Boolean,
+    default: false,  // default is "in stock"
+  },
   imagesUltra: {
     type: [{ type: String }],
     validate: [arrayLimit, 'Cannot upload more than 3 ultra images']
@@ -28,11 +32,28 @@ const houseSchema = new mongoose.Schema({
     type: [{ type: String }],
     validate: [arrayLimit, 'Cannot upload more than 3 post images']
   },
+  hidden: {
+  type: Boolean,
+  default: false,
+},
   postedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   favCount: { type: Number, default: 0 },
-  reviews: [reviewSchema]
+  reviews: [reviewSchema],
+  flaggedForDeletion: { type: Boolean, default: false },
+  deleteAt: { type: Date, default: null },
+
+  hiddenByModerator: {
+  type: Boolean,
+  default: false
+},
+moderationMessage: {
+  type: String,
+  default: ''
+}
+
 }, { timestamps: true });
 
+houseSchema.index({ deleteAt: 1 }, { expireAfterSeconds: 0 });
 houseSchema.index({ title: 'text', description: 'text' });
 const House = mongoose.model('House', houseSchema);
 export default House;

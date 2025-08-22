@@ -4,12 +4,15 @@ import connectDB from './config/db.js';
 import userRoutes from './routes/userRoutes.js';
 import houseRoutes from './routes/houseRoutes.js';
 import authRoutes from './routes/authRoutes.js';
+import reportRoutes from './routes/reportRoutes.js';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+
 
 dotenv.config();
 
 const app = express();
+
 
 
 // --- CORS Setup ---
@@ -18,6 +21,9 @@ const allowedOrigins = [
   'http://localhost:5173', // your frontend during development
   'https://your-production-frontend.com' // your deployed frontend
 ];
+
+
+
 
 app.use(cors({
   origin: function (origin, callback) {
@@ -35,7 +41,7 @@ app.use(express.json());
 
 app.use(cookieParser());
 
-
+app.use('/api/reports', reportRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/houses', houseRoutes);
 app.use('/api/auth', authRoutes);
@@ -46,8 +52,8 @@ connectDB()
   .then(() => {
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-    });
+  console.log(`🚀 Server running on port ${PORT}`);
+});
   })
   .catch(err => console.error('Failed to start:', err));
 
