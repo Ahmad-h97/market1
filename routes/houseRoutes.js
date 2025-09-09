@@ -3,7 +3,7 @@ import verifyJWT from '../middleware/verifyJWT.js';
 import partialHouseData from '../middleware/auth.js';
  import optionalAuth from '../middleware/optionalAuth.js'
 import { 
-  getAllHouses,getMyHouses, getHouseDetails,postHouse,hideHouse, editHouse, deleteHouse, upsertReview, deleteReview ,getUserHouses,toggleOutOfStock
+  getAllHouses,getMyHouses, getHouseDetails,postHouse,hideHouse, editHouse, deleteHouse, upsertReview, deleteReview ,getUserHouses,toggleOutOfStock,clickHouse 
 } from '../controllers/houseController.js';
 import { uploadMultiple } from '../middleware/upload.js';
 import { checkRole } from '../middleware/checkRole.js';
@@ -22,6 +22,6 @@ router.put('/:houseId/reviews/:userId',verifyJWT,checkSuspended,  upsertReview);
 router.delete('/:houseId/reviews/:userId',verifyJWT, deleteReview);
 router.patch('/houses/:houseId/toggle-stock',verifyJWT, toggleOutOfStock);
 router.patch('/hide-house/:id', verifyJWT, checkRole(['admin', 'moderator']), hideHouse);
-
+router.post('/houses/:houseId/click', verifyJWT, clickHouse);
 
 export default router;  // ES Modules default export

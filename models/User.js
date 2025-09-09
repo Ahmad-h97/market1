@@ -54,7 +54,19 @@ moderationMessage: {
     enum: ['info', 'warning', 'positive'],
     default: 'info'
   }
-}
+},
+  seenPosts: [
+  {
+    house: { type: mongoose.Schema.Types.ObjectId, ref: 'House' },
+    seenAt: { type: Date, default: Date.now }
+  }
+],
+clickedPosts: [
+  {
+    house: { type: mongoose.Schema.Types.ObjectId, ref: 'House' },
+    clickedAt: { type: Date, default: Date.now }
+  }
+]
 }, { timestamps: true });
 
 

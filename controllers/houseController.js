@@ -8,17 +8,18 @@ import { logActionToReport } from '../utils/reportActions.js'; // adjust path as
 import Report from '../models/Report.js';
 import { addEditRecord } from '../utils/editHistoryUtils.js';
 import mongoose from 'mongoose';
-
+import { getSocketServer } from '../socket.js'; // <- new, for emitting events
 
 const getAllHouses = async (req, res) => {
   try {
-     console.log('🔍 Query cursor:', req.query.cursor);  // Log all query params
+    console.time('Total getAllHouses'); 
 
-  
+    console.log('🔍 Query cursor:', req.query.cursor);  
+
+    console.time('Parse query params');
     const limit = Math.min(parseInt(req.query.limit) || 10, 20);
     const cursor = req.query.cursor;
     const page = parseInt(req.query.page, 10);
-
     const {
       location,
       search,
@@ -27,18 +28,20 @@ const getAllHouses = async (req, res) => {
       timeAmount,
       timeUnit,
     } = req.query;
-
     const categoriesQuery = req.query.interestedCategories;
+    console.timeEnd('Parse query params');
+
     const match = { flaggedForDeletion: { $ne: true } };
 
     if (categoriesQuery) {
+      console.time('Build categories filter');
       const categories = Array.isArray(categoriesQuery)
         ? categoriesQuery
         : categoriesQuery.split(',');
       match.category = { $in: categories };
+      console.timeEnd('Build categories filter');
     }
 
-    
     if (location) {
       match.location = { $regex: location, $options: 'i' };
     }
@@ -54,6 +57,7 @@ const getAllHouses = async (req, res) => {
     }
 
     if (timeAmount && timeUnit) {
+      console.time('Build time filter');
       const now = new Date();
       const amount = parseInt(timeAmount, 10);
       const cutoff = new Date(now);
@@ -66,10 +70,11 @@ const getAllHouses = async (req, res) => {
         case "years": cutoff.setFullYear(now.getFullYear() - amount); break;
       }
       match.createdAt = { $gte: cutoff };
+      console.timeEnd('Build time filter');
     }
 
-    // Hybrid: convert page to cursor
     if (!cursor && page && page > 1) {
+      console.time('Convert page to cursor');
       const offset = (page - 1) * limit;
       const sortedMatch = await House.find(match)
         .sort({ createdAt: -1 })
@@ -79,40 +84,39 @@ const getAllHouses = async (req, res) => {
       if (sortedMatch.length > 0) {
         match._id = { $lt: sortedMatch[0]._id };
       }
+      console.timeEnd('Convert page to cursor');
     }
 
-   if (cursor) {
-  const [cursorCreatedAtStr, cursorIdStr] = cursor.split('|');
-  const cursorCreatedAt = new Date(cursorCreatedAtStr);
+    if (cursor) {
+      console.time('Parse cursor');
+      const [cursorCreatedAtStr, cursorIdStr] = cursor.split('|');
+      const cursorCreatedAt = new Date(cursorCreatedAtStr);
+      if (!isNaN(cursorCreatedAt.getTime())) {
+        const cursorId = new mongoose.Types.ObjectId(cursorIdStr);
+        match.$or = [
+          { createdAt: { $lt: cursorCreatedAt } },
+          { createdAt: cursorCreatedAt, _id: { $lt: cursorId } }
+        ];
+      }
+      console.timeEnd('Parse cursor');
+    }
 
-  // Check if date is valid
-  if (isNaN(cursorCreatedAt.getTime())) {
-    // invalid date, handle error or ignore cursor
-    console.warn('⚠️ Invalid cursor date:', cursorCreatedAtStr);
-  } else {
-    const cursorId = new mongoose.Types.ObjectId(cursorIdStr);
-    match.$or = [
-      { createdAt: { $lt: cursorCreatedAt } },
-      { createdAt: cursorCreatedAt, _id: { $lt: cursorId } }
-    ];
-  }
-}
-
+    console.time('Fetch user role');
     const userRole = req.user?.role || 'user';
     const isModeratorOrAdmin = ['admin', 'moderator'].includes(userRole);
+    console.timeEnd('Fetch user role');
 
     let userCity = null;
     if (req.user?.id) {
+      console.time('Fetch user city');
       const user = await User.findById(req.user.id).select('city');
       userCity = user?.city || null;
+      console.timeEnd('Fetch user city');
     }
     if (location) userCity = null;
 
-   
-
-
+    console.time('Build pipeline');
     const pipeline = [{ $match: match }];
-
     if (search) {
       pipeline.push(
         { $addFields: { score: { $meta: "textScore" } } },
@@ -120,17 +124,12 @@ const getAllHouses = async (req, res) => {
       );
     } else if (userCity) {
       pipeline.push(
-        {
-          $addFields: {
-            iscity: { $cond: [{ $eq: ["$location", userCity] }, 1, 0] }
-          }
-        },
+        { $addFields: { iscity: { $cond: [{ $eq: ["$location", userCity] }, 1, 0] } } },
         { $sort: { iscity: -1, createdAt: -1 } }
       );
     } else {
       pipeline.push({ $sort: { createdAt: -1 } });
     }
-
     pipeline.push(
       {
         $lookup: {
@@ -142,7 +141,6 @@ const getAllHouses = async (req, res) => {
       },
       { $unwind: '$postedBy' }
     );
-
     if (!isModeratorOrAdmin) {
       pipeline.push({
         $match: {
@@ -152,139 +150,116 @@ const getAllHouses = async (req, res) => {
         }
       });
     }
-
     pipeline.push({ $limit: limit });
+    console.timeEnd('Build pipeline');
 
+    console.time('Aggregate houses');
     let houses = await House.aggregate(pipeline);
+    console.timeEnd('Aggregate houses');
+
+    console.time('Populate postedBy');
     houses = await House.populate(houses, {
       path: 'postedBy',
       select: 'username email profileImage hidden banned'
     });
+    console.timeEnd('Populate postedBy');
 
+    if (req.user?.id && houses.length > 0) {
+      console.time('Update seen posts and views');
+      const houseIds = houses.map(h => h._id.toString());
+      const user = await User.findById(req.user.id).select('seenPosts');
+      const seenSet = new Set(user.seenPosts.map(sp => sp.house.toString()));
+      const newlySeenIds = houseIds.filter(id => !seenSet.has(id));
+      if (newlySeenIds.length > 0) {
+        await User.updateOne(
+          { _id: req.user.id },
+          { $push: { seenPosts: { $each: newlySeenIds.map(id => ({ house: id, seenAt: new Date() })) } } }
+        );
+        await House.updateMany(
+          { _id: { $in: newlySeenIds } },
+          { $inc: { viewCount: 1 }, $set: { lastInteractionAt: new Date() } }
+        );
+      }
+      console.timeEnd('Update seen posts and views');
+    }
 
-    
-
-
-    
-// Parse absoluteLatest from query param JSON string if present
-let absoluteLatest = null;
-if (req.query.absoluteLatest) {
-  try {
-    absoluteLatest = JSON.parse(req.query.absoluteLatest);
-    // convert types if needed:
-    absoluteLatest.createdAt = new Date(absoluteLatest.createdAt);
-    absoluteLatest._id = new mongoose.Types.ObjectId(absoluteLatest._id);
-  } catch (err) {
-    console.warn('⚠️ Failed to parse absoluteLatest from req.query:', err);
-    absoluteLatest = null;
-  }
-}
-
-
+    console.time('Handle absoluteLatest');
+    let absoluteLatest = null;
+    if (req.query.absoluteLatest) {
+      try {
+        absoluteLatest = JSON.parse(req.query.absoluteLatest);
+        absoluteLatest.createdAt = new Date(absoluteLatest.createdAt);
+        absoluteLatest._id = new mongoose.Types.ObjectId(absoluteLatest._id);
+      } catch (err) {
+        absoluteLatest = null;
+      }
+    }
     if (!absoluteLatest) {
-  if (page === 1 && houses.length > 0) {
-    absoluteLatest = houses[0]; // Set from page 1 results
-   console.log('absoluteLatest if page 1 ', {
-  postedById: absoluteLatest.postedBy?._id?.toString() || null,
-  createdAt: absoluteLatest.createdAt,
-  location: absoluteLatest.location
-});
-  } else {
-    // Fetch directly from DB
-    absoluteLatest = await House.findOne({ flaggedForDeletion: { $ne: true } })
-      .sort({ createdAt: -1, _id: -1 })
-      .select('_id createdAt title location');
-      console.log('absoluteLatest if page 2 or bigger  ', {
-  postedById: absoluteLatest.postedBy?._id?.toString() || null,
-  createdAt: absoluteLatest.createdAt,
-  location: absoluteLatest.location
-});
+      if (page === 1 && houses.length > 0) {
+        absoluteLatest = houses[0];
+      } else {
+        absoluteLatest = await House.findOne({ flaggedForDeletion: { $ne: true } })
+          .sort({ createdAt: -1, _id: -1 })
+          .select('_id createdAt title location');
+      }
+    }
+    console.timeEnd('Handle absoluteLatest');
 
-  }
-  
-}
-
-
-
-  let newPosts = [];
+    console.time('Find newer posts');
+    let newPosts = [];
     let firstNew = null;
     let lastNew = null;
     let evenNewerPosts = [];
 
-const newerThanAbsoluteQuery = {
-  $or: [
-    { createdAt: { $gt: absoluteLatest.createdAt } },
-    {
-      createdAt: absoluteLatest.createdAt,
-      _id: { $gt: absoluteLatest._id }
+    const newerThanAbsoluteQuery = {
+      $or: [
+        { createdAt: { $gt: absoluteLatest.createdAt } },
+        { createdAt: absoluteLatest.createdAt, _id: { $gt: absoluteLatest._id } }
+      ],
+      flaggedForDeletion: { $ne: true }
+    };
+    if (userCity && !location) {
+      newerThanAbsoluteQuery.location = userCity;
     }
-  ],
-  flaggedForDeletion: { $ne: true }
-};
 
-if (userCity && !location) {
-  newerThanAbsoluteQuery.location = userCity;
-}
+    evenNewerPosts = await House.find(newerThanAbsoluteQuery)
+      .sort({ createdAt: 1 })
+      .limit(3);
+    evenNewerPosts = await House.populate(evenNewerPosts, {
+      path: 'postedBy',
+      select: 'username email profileImage hidden banned'
+    });
+    if (evenNewerPosts.length > 0) {
+      newPosts = evenNewerPosts;
+      firstNew = newPosts[0]._id.toString();
+      lastNew = newPosts[newPosts.length - 1]._id.toString();
+      absoluteLatest = newPosts[newPosts.length - 1];
+    }
+    console.timeEnd('Find newer posts');
 
-evenNewerPosts = await House.find(newerThanAbsoluteQuery)
-  .sort({ createdAt: 1 }) // ascending: oldest new post first
-  .limit(3);
-
-evenNewerPosts = await House.populate(evenNewerPosts, {
-  path: 'postedBy',
-  select: 'username email profileImage hidden banned'
-});
-
-
-
-if (evenNewerPosts.length > 0) {
-  newPosts = evenNewerPosts;
-  firstNew = newPosts[0]._id.toString();
-  lastNew = newPosts[newPosts.length - 1]._id.toString();
-
-  // Set newest in new list as the new absoluteLatest
-  absoluteLatest = newPosts[newPosts.length - 1]; // The last is the newest
-}
-  
-    
-console.log("🚨 Even newer than absoluteLatest:", evenNewerPosts.map(p => ({
-  id: p._id.toString(),
-  createdAt: p.createdAt,
-  location: p.location
-})));
-
-
-if (evenNewerPosts.length > 0) {
-  absoluteLatest = evenNewerPosts[evenNewerPosts.length - 1]; // newest
-} else if (newPosts.length > 0) {
-  absoluteLatest = newPosts[newPosts.length - 1]; // newest
-}
-
- 
- 
-
+    console.time('Fetch following list');
     let followingSet = new Set();
     if (req.user?.id) {
       const currentUser = await User.findById(req.user.id).select('following');
       followingSet = new Set(currentUser.following.map(id => id.toString()));
     }
+    console.timeEnd('Fetch following list');
 
-    const mapper = res.locals.showFullDetails
-      ? getPrivateHouseDetails
-      : getPublicHouseDetails;
-
+    console.time('Map houses for response');
+    const mapper = res.locals.showFullDetails ? getPrivateHouseDetails : getPublicHouseDetails;
     const data = houses.map(house => {
       const postedById = house.postedBy?._id?.toString();
       const isFollowing = followingSet.has(postedById);
       return mapper(house, isFollowing);
     });
-
     const newPostsMapped = newPosts.map(house => {
       const postedById = house.postedBy?._id?.toString();
       const isFollowing = followingSet.has(postedById);
       return mapper(house, isFollowing);
     });
+    console.timeEnd('Map houses for response');
 
+    console.time('Prepare response');
     const lastHouse = houses[houses.length - 1];
     const nextCursor = lastHouse
       ? `${lastHouse.createdAt.toISOString()}|${lastHouse._id.toString()}`
@@ -297,20 +272,24 @@ if (evenNewerPosts.length > 0) {
       newPosts: newPostsMapped,
       firstNew,
       lastNew,
-        absoluteLatest: {
-    _id: absoluteLatest._id.toString(),
-    createdAt: absoluteLatest.createdAt.toISOString(),
-    title: absoluteLatest.title,
-    location: absoluteLatest.location,
-  },
+      absoluteLatest: {
+        _id: absoluteLatest._id.toString(),
+        createdAt: absoluteLatest.createdAt.toISOString(),
+        title: absoluteLatest.title,
+        location: absoluteLatest.location,
+      },
     });
+    console.timeEnd('Prepare response');
 
+    console.timeEnd('Total getAllHouses');
   } catch (err) {
     console.error('❌ Get Houses Error:', err);
     res.status(500).json({ error: 'Server error' });
   }
-  console.log('🏁🏁🏁🏁🏁🏁🏁🏁🏁🏁🏁')
+  console.log('🏁🏁🏁🏁🏁🏁🏁🏁🏁🏁🏁');
 };
+
+
 
 
 
@@ -533,51 +512,37 @@ const getHouseDetails = async (req, res) => {
   }
 };
 
-
 const postHouse = async (req, res) => {
-  
-
   try {
-
-    
-  const imagesUltraFiles = req.files['imagesUltra'] || [];
+    const imagesUltraFiles = req.files['imagesUltra'] || [];
     const imagesPostFiles = req.files['imagesPost'] || [];
-    
-  
 
-  if (imagesUltraFiles.length > 3 || imagesPostFiles.length > 3) {
+    if (imagesUltraFiles.length > 3 || imagesPostFiles.length > 3) {
       return res.status(400).json({ error: 'Maximum of 3 images allowed for each type.' });
     }
 
-
-   const imagesUltraUrls = imagesUltraFiles.map(file => file.path);
+    const imagesUltraUrls = imagesUltraFiles.map(file => file.path);
     const imagesPostUrls = imagesPostFiles.map(file => file.path);
 
-    const { title,description, location, price, category } = req.body;
-  //const imageUrl = req.file ? req.file.path : null;
-
-     // 2. Get user ID from token (set in verifyJWT middleware)
+    const { title, description, location, price, category } = req.body;
     const userId = req.user.id;
 
-console.log(userId)
-    // 1. Find the user
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const categories= [
-  "real estate",
-  "electronics",
-  "phones & PC",
-  "clothes",
-  "services",
-  "vehicles"
-];
-    
- if (!categories.includes(category)) {
+    const categories = [
+      "real estate",
+      "electronics",
+      "phones & PC",
+      "clothes",
+      "services",
+      "vehicles"
+    ];
+
+    if (!categories.includes(category)) {
       return res.status(400).json({ message: 'Invalid category' });
     }
-    
-    // 2. Create new house
+
     const newHouse = new House({
       title,
       description,
@@ -591,18 +556,28 @@ console.log(userId)
 
     await newHouse.save();
 
-    
-    // 3. Optional: Add to user's postedHouses array
     user.postedHouses.push(newHouse._id);
     await user.save();
 
-  
-    res.status(201).json({ message: 'House posted', house: newHouse });
+    const populatedHouse = await House.findById(newHouse._id).populate({
+      path: 'postedBy',
+      select: 'username email profileImage hidden banned'
+    });
+
+    const mappedHouse = getPublicHouseDetails(populatedHouse); // always use DTO
+
+    const io = getSocketServer();
+    io.emit('newHouse', mappedHouse);
+
+    // Return the same DTO as response
+    res.status(201).json({ message: 'House posted', house: mappedHouse });
+
   } catch (err) {
     console.error('Post House Error:', err);
     res.status(500).json({ error: err.message });
   }
 };
+
 
 
 const editHouse = async (req, res) => {
@@ -725,7 +700,21 @@ const editHouse = async (req, res) => {
       )
     );
 
-    res.status(200).json({ message: "House updated", house });
+    
+    // ✅ Populate user so socket clients get same DTO style
+    const populatedHouse = await House.findById(house._id).populate({
+      path: 'postedBy',
+      select: 'username email profileImage hidden banned'
+    });
+
+    const mappedHouse = getPublicHouseDetails(populatedHouse);
+
+    // ✅ WebSocket emit
+    const io = getSocketServer();
+    console.log("🔥 Emitting houseUpdated for:", mappedHouse.id);
+    io.emit('houseUpdated', mappedHouse);
+    
+    res.status(200).json({ message: "House updated", house: mappedHouse });
 
   } catch (err) {
     console.error("Edit House Error:", err);
@@ -924,6 +913,45 @@ export const hideHouse = async (req, res) => {
     res.status(500).json({ message: 'Failed to update house visibility' });
   }
 };
+
+
+
+export const clickHouse = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { houseId } = req.params;
+console.log("🏠 houseId received:", houseId); // <-- log the houseId
+
+    // Step 1: check if the user already clicked this house
+    const alreadyClicked = await User.exists({
+      _id: userId,
+      "clickedPosts.house": houseId
+    });
+
+    if (alreadyClicked) {
+      return res.status(200).json({ message: "Already clicked, not counted again" });
+    }
+
+    // Step 2: update both User & House
+    await Promise.all([
+      House.findByIdAndUpdate(houseId, {
+        $inc: { clickCount: 1 },
+        $set: { lastClickAt: new Date(),
+           lastInteractionAt: new Date()
+         }
+      }),
+      User.findByIdAndUpdate(userId, {
+        $push: { clickedPosts: { house: houseId, clickedAt: new Date() } }
+      })
+    ]);
+
+    return res.status(200).json({ message: "Click registered" });
+  } catch (err) {
+    console.error("❌ clickHouse error:", err);
+    return res.status(500).json({ error: "Failed to register click" });
+  }
+};
+
 
 
 export { getAllHouses,getMyHouses,getUserHouses, getHouseDetails,postHouse, editHouse ,deleteHouse , deleteReview, upsertReview,toggleOutOfStock };

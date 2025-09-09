@@ -1,3 +1,4 @@
+
 import express from 'express';
 import dotenv from 'dotenv';
 import connectDB from './config/db.js';
@@ -7,12 +8,18 @@ import authRoutes from './routes/authRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import http from 'http';
+
+import { initSocketServer } from './socket.js';
+import "./jobs/scheduler.js";
 
 
 dotenv.config();
 
 const app = express();
+const server = http.createServer(app); // create raw server
 
+const io = initSocketServer(server);
 
 
 // --- CORS Setup ---
@@ -22,6 +29,13 @@ const allowedOrigins = [
   'https://your-production-frontend.com' // your deployed frontend
 ];
 
+io.on("connection", (socket) => {
+  console.log("A user connected:", socket.id);
+
+  socket.on("disconnect", () => {
+    console.log("User disconnected:", socket.id);
+  });
+});
 
 
 
@@ -51,7 +65,9 @@ app.use('/api/auth', authRoutes);
 connectDB()
   .then(() => {
     const PORT = process.env.PORT || 5000;
-    app.listen(PORT, '0.0.0.0', () => {
+  
+
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
   })
@@ -96,8 +112,4 @@ market/
 ├── server.js
 ├── services.js
 └── .gitignore
-*/
-
-/*
-
 */

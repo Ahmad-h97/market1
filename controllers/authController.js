@@ -274,7 +274,7 @@ const refreshToken = async (req, res) => {
       if (err || foundUser._id.toString() !== decoded.id) return res.sendStatus(403);
 
       const accessToken = jwt.sign(
-        { id: foundUser._id,  },
+        { id: foundUser._id, role: foundUser.role   },
         process.env.ACCESS_TOKEN_SECRET,
         { expiresIn: '15m' }
       );

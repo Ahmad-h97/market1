@@ -49,9 +49,19 @@ const houseSchema = new mongoose.Schema({
 moderationMessage: {
   type: String,
   default: ''
-}
+},
 
+  viewCount: { type: Number, default: 0 },
+  clickCount: { type: Number, default: 0 },
+  score: { type: Number, default: 0, index: true },
+  lastClickAt: { type: Date, default: null },
+  lastInteractionAt: { type: Date, default: null },
+  lastScoreUpdateAt: { type: Date, default: null }   
 }, { timestamps: true });
+
+houseSchema.index({ score: -1 });               // fetch top houses quickly
+houseSchema.index({ lastInteractionAt: 1 });    // find houses with recent interactions
+houseSchema.index({ lastScoreUpdateAt: 1 }); 
 
 houseSchema.index({ deleteAt: 1 }, { expireAfterSeconds: 0 });
 houseSchema.index({ title: 'text', description: 'text' });
